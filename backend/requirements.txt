@@ -1,0 +1,22 @@
+# ============================================================
+# requirements.txt
+# Dependencies backend FastAPI + MQTT consumer
+# ============================================================
+
+# Web framework
+fastapi==0.115.0
+
+# ASGI server untuk menjalankan FastAPI
+uvicorn==0.30.6
+
+# MQTT client
+paho-mqtt==2.1.0
+
+# Koneksi ke PostgreSQL
+psycopg2-binary==2.9.9
+
+# Validasi environment variable dari .env
+python-dotenv==1.0.1
+
+# Pydantic sudah include di FastAPI, tapi pin versinya supaya konsisten
+pydantic==2.9.2
