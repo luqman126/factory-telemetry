@@ -1,0 +1,82 @@
+# ============================================================
+# docker-compose.yml
+# Base services untuk local development
+# Dijalankan dari direktori infra/
+#
+# Sebelum menjalankan:
+#   cp .env.example .env
+#   isi kredensial di .env
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # TimescaleDB
+  # ----------------------------------------------------------
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: iot_timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ../db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - iot_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------
+  # Mosquitto
+  # ----------------------------------------------------------
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: iot_mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - iot_net
+
+  # ----------------------------------------------------------
+  # Grafana
+  # ----------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: iot_grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER:     ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    networks:
+      - iot_net
+
+networks:
+  iot_net:
+    driver: bridge
+
+volumes:
+  timescaledb_data:
+  mosquitto_data:
+  mosquitto_log:
+  grafana_data:

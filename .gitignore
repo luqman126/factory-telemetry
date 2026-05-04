@@ -1,0 +1,17 @@
+# Credentials - jangan pernah di-commit
+infra/.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Spark
+spark-jobs/*.egg
+spark-jobs/metastore_db/
+
+# OS
+.DS_Store
+Thumbs.db
