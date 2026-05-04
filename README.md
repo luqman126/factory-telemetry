@@ -1,12 +1,12 @@
 # iot-bigdata-project
 
-Sistem monitoring manufaktur produksi berbasis IoT dengan pipeline big data end-to-end — mulai dari ingestion data sensor secara real-time, penyimpanan time-series, batch analytics menggunakan Apache Spark, hingga visualisasi di Grafana.
+Sistem monitoring manufaktur produksi berbasis IoT dengan pipeline big data end-to-end, mulai dari ingestion data sensor secara real-time, penyimpanan time-series, batch analytics menggunakan Apache Spark, hingga visualisasi di Grafana.
 
 ---
 
 ## Latar Belakang
 
-Lingkungan manufaktur menghasilkan data sensor secara terus-menerus: suhu, kelembaban, getaran, hingga kadar uap flux yang berbahaya bagi kesehatan. Data ini nilainya rendah kalau hanya dibaca satu per satu — tapi kalau dikumpulkan, disimpan, dan dianalisis dalam jumlah besar, bisa menghasilkan insight seperti tren anomali, pola paparan uap per shift, atau perbandingan kondisi antar bagian lingkungan produksi.
+Lingkungan manufaktur menghasilkan data sensor secara terus-menerus: suhu, kelembaban, getaran, hingga kadar uap flux yang berbahaya bagi kesehatan. Data ini nilainya rendah kalau hanya dibaca satu per satu, tapi kalau dikumpulkan, disimpan, dan dianalisis dalam jumlah besar, bisa menghasilkan insight seperti tren anomali, pola paparan uap per shift, atau perbandingan kondisi antar bagian lingkungan produksi.
 
 Project ini membangun infrastruktur untuk melakukan hal tersebut, sekaligus menjadi eksperimen distributed computing dengan membandingkan performa Apache Spark dalam skenario berbeda: master only, master + 1 worker, dan master + 2 worker.
 
