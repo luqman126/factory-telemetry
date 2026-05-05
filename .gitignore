@@ -11,6 +11,7 @@ venv/
 # Spark
 spark-jobs/*.egg
 spark-jobs/metastore_db/
+spark-jobs/data/
 
 # OS
 .DS_Store
