@@ -1,0 +1,14 @@
+# ============================================================
+# grafana/provisioning/dashboards/dashboard.yml
+# Memberitahu Grafana di mana mencari file dashboard JSON
+# ============================================================
+
+apiVersion: 1
+
+providers:
+  - name: IoT Dashboards
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards

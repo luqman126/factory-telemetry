@@ -1,6 +1,6 @@
 # iot-bigdata-project
 
-Sistem monitoring manufaktur berbasis IoT dengan pipeline big data end-to-end — mulai dari ingestion data sensor secara real-time, penyimpanan time-series, batch analytics menggunakan Apache Spark, hingga visualisasi di Grafana.
+Sistem monitoring manufaktur berbasis IoT dengan pipeline big data end-to-end, mulai dari ingestion data sensor secara real-time, penyimpanan time-series, batch analytics menggunakan Apache Spark, hingga visualisasi di Grafana.
 
 ---
 
