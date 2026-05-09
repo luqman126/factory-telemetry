@@ -1,5 +1,6 @@
 # Credentials - jangan pernah di-commit
 infra/.env
+grafana/provisioning/datasources/timescaledb.yml
 
 # Python
 __pycache__/
