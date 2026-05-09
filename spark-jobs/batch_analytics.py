@@ -103,14 +103,25 @@ def run(parquet_path: str, worker_count: int = 0):
     logger.info(f"Workers  : {worker_count}")
 
     # --------------------------------------------------------
-    # Init Spark — local mode
+    # Init Spark — local mode + S3A config
     # --------------------------------------------------------
     spark = SparkSession.builder \
         .appName(f"iot_analytics_{job_id}") \
         .master("local[*]") \
+        .config("spark.hadoop.fs.s3a.impl",
+                "org.apache.hadoop.fs.s3a.S3AFileSystem") \
+        .config("spark.hadoop.fs.s3a.aws.credentials.provider",
+                "com.amazonaws.auth.InstanceProfileCredentialsProvider") \
+        .config("spark.hadoop.fs.s3a.endpoint",
+                "s3.ap-southeast-1.amazonaws.com") \
         .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")
+
+    # --------------------------------------------------------
+    # Normalise path — Spark butuh s3a://, bukan s3://
+    # --------------------------------------------------------
+    parquet_path = parquet_path.replace("s3://", "s3a://", 1)
 
     # --------------------------------------------------------
     # Baca Parquet
