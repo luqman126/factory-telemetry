@@ -1,6 +1,6 @@
 # ============================================================
 # spark-jobs/export_to_parquet.py
-# Export data sensor dari TimescaleDB ke file Parquet lokal
+# Export data sensor dari TimescaleDB ke S3 (via Parquet lokal)
 # Dijalankan sebelum batch_analytics.py
 # ============================================================
 
@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
+import boto3
 import pandas as pd
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
@@ -25,13 +26,10 @@ logger = logging.getLogger(__name__)
 # ============================================================
 # Konfigurasi
 # ============================================================
-
-# Direktori output Parquet — dibuat otomatis kalau belum ada
-OUTPUT_DIR = Path(__file__).parent / "data" / "parquet"
-
-# Window waktu export: default 1 jam terakhir
-# Bisa diubah sesuai kebutuhan
+OUTPUT_DIR  = Path(__file__).parent / "data" / "parquet"
 WINDOW_HOURS = 1
+S3_BUCKET   = os.getenv("S3_BUCKET", "iot-bigdata-datalake-kagebyo")
+S3_PREFIX   = "raw"
 
 
 def get_engine():
@@ -43,11 +41,24 @@ def get_engine():
     return create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}")
 
 
-def export(window_hours: int = WINDOW_HOURS) -> Path:
+def upload_to_s3(local_path: Path, s3_key: str) -> str:
     """
-    Query sensor_readings dalam window waktu tertentu,
-    simpan sebagai file Parquet dengan nama berdasarkan timestamp.
-    Kembalikan path file yang dihasilkan.
+    Upload file lokal ke S3.
+    Pakai IAM Role — tidak perlu credentials eksplisit.
+    Kembalikan S3 URI lengkap.
+    """
+    s3 = boto3.client("s3", region_name="ap-southeast-1")
+    s3.upload_file(str(local_path), S3_BUCKET, s3_key)
+    s3_uri = f"s3://{S3_BUCKET}/{s3_key}"
+    logger.info(f"Upload ke S3: {s3_uri}")
+    return s3_uri
+
+
+def export(window_hours: int = WINDOW_HOURS) -> str:
+    """
+    Query sensor_readings, simpan ke Parquet lokal,
+    upload ke S3, hapus file lokal.
+    Kembalikan S3 URI file yang diupload.
     """
     now       = datetime.now(timezone.utc)
     from_time = now - timedelta(hours=window_hours)
@@ -82,24 +93,32 @@ def export(window_hours: int = WINDOW_HOURS) -> Path:
 
     logger.info(f"Berhasil query {len(df)} baris dari DB")
 
-    # Buat direktori output kalau belum ada
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Nama file berdasarkan timestamp window
-    filename = f"sensor_{from_time.strftime('%Y%m%d_%H%M%S')}_{now.strftime('%Y%m%d_%H%M%S')}.parquet"
-    output_path = OUTPUT_DIR / filename
-
+    # Fix timestamp supaya kompatibel dengan Spark
     df["time"] = pd.to_datetime(df["time"])
-    df["time"] = df["time"].dt.tz_localize(None)  # kalau ada timezone
-    df["time"] = df["time"].astype("datetime64[us]")    
-    
-    df.to_parquet(output_path, index=False, engine="pyarrow")
-    logger.info(f"Parquet tersimpan: {output_path} ({output_path.stat().st_size / 1024:.1f} KB)")
+    df["time"] = df["time"].dt.tz_localize(None)
+    df["time"] = df["time"].astype("datetime64[us]")
 
-    return output_path
+    # Simpan ke lokal dulu
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    filename    = f"sensor_{from_time.strftime('%Y%m%d_%H%M%S')}_{now.strftime('%Y%m%d_%H%M%S')}.parquet"
+    local_path  = OUTPUT_DIR / filename
+
+    df.to_parquet(local_path, index=False, engine="pyarrow")
+    logger.info(f"Parquet lokal: {local_path} ({local_path.stat().st_size / 1024:.1f} KB)")
+
+    # Upload ke S3
+    s3_key = f"{S3_PREFIX}/{filename}"
+    s3_uri = upload_to_s3(local_path, s3_key)
+
+    # Hapus file lokal setelah upload berhasil
+    local_path.unlink()
+    logger.info("File lokal dihapus setelah upload")
+
+    return s3_uri
 
 
 if __name__ == "__main__":
-    path = export()
-    if path:
-        print(f"\nOutput: {path}")
+    uri = export()
+    if uri:
+        print(f"\nS3 URI: {uri}")
+    
