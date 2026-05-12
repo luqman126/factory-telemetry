@@ -1,0 +1,155 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: iot-alerts
+    folder: IoT
+    interval: 1m
+
+    rules:
+
+      # ----------------------------------------------------------
+      # Suhu tinggi — berlaku semua ruangan
+      # Critical threshold: 45°C (sesuai DATA_CONTRACT)
+      # ----------------------------------------------------------
+      - uid: high-temperature
+        title: High Temperature Detected
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: P40AE60E18F02DE32
+            model:
+              datasource:
+                type: postgres
+                uid: P40AE60E18F02DE32
+              editorMode: code
+              format: table
+              rawSql: |
+                SELECT
+                  avg(temperature) as temperature
+                FROM sensor_readings
+                WHERE time >= NOW() - INTERVAL '1 minute'
+                AND temperature IS NOT NULL;
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    params: [45]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Suhu tinggi terdeteksi"
+          description: "Rata-rata suhu 1 menit terakhir melebihi 45°C"
+        labels:
+          severity: critical
+
+      # ----------------------------------------------------------
+      # Kadar uap flux berbahaya — ruang penyolderan
+      # Critical threshold: 75 ppm (sesuai DATA_CONTRACT)
+      # ----------------------------------------------------------
+      - uid: high-flux-ppm
+        title: Hazardous Flux Vapor Detected
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: P40AE60E18F02DE32
+            model:
+              datasource:
+                type: postgres
+                uid: P40AE60E18F02DE32
+              editorMode: code
+              format: table
+              rawSql: |
+                SELECT
+                  avg(flux_ppm) as flux_ppm
+                FROM sensor_readings
+                WHERE time >= NOW() - INTERVAL '1 minute'
+                AND flux_ppm IS NOT NULL
+                AND location = 'ruang_penyolderan';
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    params: [75]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Kadar uap flux berbahaya"
+          description: "Rata-rata flux_ppm 1 menit terakhir melebihi 75 ppm di ruang penyolderan"
+        labels:
+          severity: critical
+
+      # ----------------------------------------------------------
+      # Getaran berlebih — ruang produksi
+      # Critical threshold: 5 m/s² (sesuai DATA_CONTRACT)
+      # ----------------------------------------------------------
+      - uid: high-vibration
+        title: Excessive Vibration Detected
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: P40AE60E18F02DE32
+            model:
+              datasource:
+                type: postgres
+                uid: P40AE60E18F02DE32
+              editorMode: code
+              format: table
+              rawSql: |
+                SELECT
+                  avg(vibration_rms) as vibration_rms
+                FROM sensor_readings
+                WHERE time >= NOW() - INTERVAL '1 minute'
+                AND vibration_rms IS NOT NULL
+                AND location = 'ruang_produksi';
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    params: [5]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Getaran berlebih terdeteksi"
+          description: "Rata-rata vibration_rms 1 menit terakhir melebihi 5 m/s² di ruang produksi"
+        labels:
+          severity: critical
