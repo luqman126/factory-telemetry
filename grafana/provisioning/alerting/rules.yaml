@@ -30,6 +30,9 @@ groups:
                 FROM sensor_readings
                 WHERE time >= NOW() - INTERVAL '1 minute'
                 AND temperature IS NOT NULL;
+              relativeTimeRange:
+                from: 150
+                to: 0
               refId: A
           - refId: C
             datasourceUid: __expr__
@@ -79,6 +82,9 @@ groups:
                 WHERE time >= NOW() - INTERVAL '1 minute'
                 AND flux_ppm IS NOT NULL
                 AND location = 'ruang_penyolderan';
+              relativeTimeRange:
+                from: 150
+                to: 0
               refId: A
           - refId: C
             datasourceUid: __expr__
@@ -128,6 +134,9 @@ groups:
                 WHERE time >= NOW() - INTERVAL '1 minute'
                 AND vibration_rms IS NOT NULL
                 AND location = 'ruang_produksi';
+              relativeTimeRange:
+                from: 150
+                to: 0                
               refId: A
           - refId: C
             datasourceUid: __expr__
