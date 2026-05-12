@@ -16,3 +16,6 @@ spark-jobs/data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Grafana
+grafana/provisioning/alerting/grafana/provisioning/alerting/contact-points.yaml
