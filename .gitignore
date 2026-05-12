@@ -18,4 +18,4 @@ spark-jobs/data/
 Thumbs.db
 
 # Grafana
-grafana/provisioning/alerting/grafana/provisioning/alerting/contact-points.yaml
+grafana/provisioning/alerting/contact-points.yaml
