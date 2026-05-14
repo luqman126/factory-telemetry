@@ -1,0 +1,157 @@
+#!/bin/bash
+# ============================================================
+# spark-jobs/run_with_worker.sh
+# Automasi ephemeral Spark worker:
+#   1. Launch EC2 worker
+#   2. Tunggu instance running
+#   3. Start Spark worker
+#   4. Submit Spark job
+#   5. Terminate EC2 worker
+#
+# Usage:
+#   ./run_with_worker.sh <s3_parquet_uri> <worker_count>
+#
+# Contoh:
+#   ./run_with_worker.sh s3://iot-bigdata-datalake-kagebyo/raw/sensor_xxx.parquet 1
+# ============================================================
+
+set -e  # exit kalau ada command yang gagal
+
+# ============================================================
+# Load konfigurasi dari .env
+# ============================================================
+ENV_PATH="$(dirname "$0")/../infra/.env"
+if [ ! -f "$ENV_PATH" ]; then
+    echo "Error: .env tidak ditemukan di $ENV_PATH"
+    exit 1
+fi
+source "$ENV_PATH"
+
+# ============================================================
+# Konfigurasi
+# ============================================================
+REGION="ap-southeast-1"
+AMI_ID="ami-03256949a823ccf8b"
+INSTANCE_TYPE="t3.small"
+SUBNET_ID="$WORKER_SUBNET_ID"
+SG_ID="$WORKER_SG_ID"
+SPARK_MASTER="$SPARK_MASTER_URL"
+SPARK_HOME="/opt/spark"
+WORKER_NAME="iot-bigdata-worker-ephemeral"
+
+# ============================================================
+# Validasi argumen
+# ============================================================
+if [ "$#" -lt 2 ]; then
+    echo "Usage: $0 <s3_parquet_uri> <worker_count>"
+    echo "Contoh: $0 s3://bucket/raw/file.parquet 1"
+    exit 1
+fi
+
+S3_URI=$1
+WORKER_COUNT=$2
+
+echo "============================================"
+echo "IoT Big Data — Ephemeral Worker Script"
+echo "S3 URI     : $S3_URI"
+echo "Workers    : $WORKER_COUNT"
+echo "============================================"
+
+# ============================================================
+# User data — inject public key Node 2 ke worker saat launch
+# ============================================================
+USER_DATA=$(cat <<'EOF'
+#!/bin/bash
+echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICTt9MoqRKuDLeEWGis1VBzNnsBu27FnW+4Q3d49e29l ec2-user@ip-10-0-1-89.ap-southeast-1.compute.internal" >> /home/ec2-user/.ssh/authorized_keys
+chmod 600 /home/ec2-user/.ssh/authorized_keys
+EOF
+)
+
+# ============================================================
+# Step 1 — Launch EC2 worker
+# ============================================================
+echo ""
+echo "[1/5] Launching EC2 worker..."
+
+INSTANCE_ID=$(aws ec2 run-instances \
+    --region "$REGION" \
+    --image-id "$AMI_ID" \
+    --instance-type "$INSTANCE_TYPE" \
+    --subnet-id "$SUBNET_ID" \
+    --security-group-ids "$SG_ID" \
+    --user-data "$USER_DATA" \
+    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$WORKER_NAME}]" \
+    --block-device-mappings "DeviceName=/dev/xvda,Ebs={VolumeSize=8,VolumeType=gp3,DeleteOnTermination=true}" \
+    --query 'Instances[0].InstanceId' \
+    --output text)
+
+echo "Instance ID: $INSTANCE_ID"
+
+# ============================================================
+# Step 2 — Tunggu instance running
+# ============================================================
+echo ""
+echo "[2/5] Waiting for instance to be running..."
+
+aws ec2 wait instance-running \
+    --region "$REGION" \
+    --instance-ids "$INSTANCE_ID"
+
+# Ambil private IP
+WORKER_IP=$(aws ec2 describe-instances \
+    --region "$REGION" \
+    --instance-ids "$INSTANCE_ID" \
+    --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+    --output text)
+
+echo "Worker IP  : $WORKER_IP"
+
+# Tunggu SSH ready (instance running != SSH ready)
+echo "Waiting for SSH to be ready..."
+sleep 30
+
+# ============================================================
+# Step 3 — Start Spark worker via SSH
+# ============================================================
+echo ""
+echo "[3/5] Starting Spark worker..."
+
+ssh -i ~/.ssh/iot-worker-key \
+    -o StrictHostKeyChecking=no \
+    -o ConnectTimeout=30 \
+    ec2-user@"$WORKER_IP" \
+    "SPARK_LOCAL_IP=$WORKER_IP $SPARK_HOME/sbin/start-worker.sh $SPARK_MASTER"
+
+echo "Spark worker started, waiting for registration..."
+sleep 15
+
+# ============================================================
+# Step 4 — Submit Spark job
+# ============================================================
+echo ""
+echo "[4/5] Submitting Spark job..."
+
+source "$(dirname "$0")/.venv/bin/activate"
+
+spark-submit \
+    --master "$SPARK_MASTER" \
+    --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261 \
+    "$(dirname "$0")/batch_analytics.py" \
+    "$S3_URI" \
+    "$WORKER_COUNT"
+
+# ============================================================
+# Step 5 — Terminate EC2 worker
+# ============================================================
+echo ""
+echo "[5/5] Terminating EC2 worker..."
+
+aws ec2 terminate-instances \
+    --region "$REGION" \
+    --instance-ids "$INSTANCE_ID"
+
+echo "Instance $INSTANCE_ID terminating..."
+echo ""
+echo "============================================"
+echo "Done."
+echo "============================================"
