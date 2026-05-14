@@ -8,7 +8,7 @@ Sistem monitoring manufaktur berbasis IoT dengan pipeline big data end-to-end, m
 
 Sistem ini memonitor kondisi tiga ruangan di lingkungan manufaktur secara real-time menggunakan sensor suhu, kelembaban, getaran, dan kadar uap gas. Data yang terkumpul dianalisis secara batch menggunakan Apache Spark untuk menghasilkan insight seperti tren anomali, agregasi per device, dan perbandingan kondisi antar ruangan.
 
-Project ini sekaligus menjadi eksperimen distributed computing dengan membandingkan performa Apache Spark dalam skenario berbeda: master only, master + 1 worker, dan master + 2 worker.
+Project ini sekaligus menjadi eksperimen distributed computing dengan membandingkan performa Apache Spark dalam berbagai skenario jumlah worker.
 
 ---
 
@@ -68,7 +68,7 @@ AWS ap-southeast-1 (Singapore)
         ├── Node 1 — c7i-flex.large (primary, always-on)
         │   ├── FastAPI Backend
         │   ├── Mosquitto MQTT
-        │   ├── Grafana + Alerting (Telegram)
+        │   ├── Grafana + Telegram Alerting
         │   ├── PostgreSQL PRIMARY (TimescaleDB)
         │   ├── Cloudflare Tunnel → grafana.cheshub.my.id
         │   └── Tailscale
@@ -78,9 +78,8 @@ AWS ap-southeast-1 (Singapore)
         │   ├── Spark Master
         │   └── Tailscale
         │
-        └── Worker Nodes — t3.small (ephemeral, launch saat job)
-            ├── Spark Worker
-            └── Tailscale
+        └── Worker Nodes — t3.small (ephemeral, otomatis via script)
+            └── Spark Worker
 
 Akses:
 ├── User    → Cloudflare Tunnel → grafana.cheshub.my.id
@@ -100,11 +99,12 @@ Akses:
 | Database       | PostgreSQL 16 + TimescaleDB            |
 | Replikasi DB   | PostgreSQL Streaming Replication       |
 | Data Lake      | Amazon S3 (format Parquet, s3a://)     |
-| Processing     | Apache Spark 3.5.8 (PySpark)          |
+| Processing     | Apache Spark 3.5.8 (PySpark)           |
 | Visualisasi    | Grafana + Telegram Alerting            |
-| Infra lokal    | Docker, Docker Compose                 |
+| Infra lokal    | WSL, Docker, Docker Compose            |
 | Infra cloud    | AWS EC2, VPC, S3, IAM                  |
 | Akses & Tunnel | Cloudflare Tunnel, Tailscale           |
+| Automasi       | Bash + AWS CLI                         |
 | Bahasa         | Python 3.12                            |
 
 ---
@@ -123,13 +123,15 @@ Akses:
 
 Dataset: 36.057 records (6 hari data sensor, 3 device)
 
-| Skenario          | Worker | Records | Execution Time |
-|-------------------|--------|---------|----------------|
-| Master only       | 0      | 36.057  | 26.04 detik    |
-| Master + 1 worker | 1      | 36.057  | 24.58 detik    |
-| Master + 2 worker | 2      | 36.057  | 23.27 detik    |
+| Skenario          | Workers | Execution Time | Speedup vs baseline |
+|-------------------|---------|----------------|---------------------|
+| Master only       | 0       | 26.04 detik    | baseline            |
+| Master + 1 worker | 1       | 24.58 detik    | 1.06x               |
+| Master + 2 worker | 2       | 23.27 detik    | 1.12x               |
+| Master + 3 worker | 3       | 22.62 detik    | 1.15x               |
+| Master + 4 worker | 4       | 21.51 detik    | 1.21x               |
 
-**Analisis:** Speedup tidak signifikan karena dataset relatif kecil untuk Spark dan bottleneck ada di I/O (baca S3), bukan compute. Distributed computing memberikan manfaat lebih nyata pada dataset skala GB/TB dan job yang compute-intensive.
+**Analisis:** Speedup yang dihasilkan kecil dan menunjukkan pola diminishing returns — setiap worker tambahan memberikan manfaat yang semakin kecil. Ini disebabkan oleh dua faktor utama: dataset yang relatif kecil (36K records) untuk ukuran Spark, dan bottleneck di I/O (baca S3) bukan compute. Distributed computing memberikan manfaat lebih nyata pada dataset skala GB/TB dan job yang compute-intensive.
 
 ---
 
@@ -146,9 +148,10 @@ iot-bigdata-project/
 │       └── mqtt/         # MQTT consumer (subscribe & proses pesan)
 ├── simulator/            # Script simulasi 3 device IoT
 ├── spark-jobs/           # PySpark batch analytics
-│   ├── export_to_parquet.py  # Export DB → Parquet → S3
-│   ├── batch_analytics.py    # Spark job: S3 → analytics → DB
-│   └── data/parquet/         # Temporary Parquet (tidak di-commit)
+│   ├── export_to_parquet.py   # Export DB → Parquet → S3
+│   ├── batch_analytics.py     # Spark job: S3 → analytics → DB
+│   ├── run_with_worker.sh     # Automasi ephemeral worker
+│   └── data/parquet/          # Temporary Parquet (tidak di-commit)
 ├── db/
 │   └── init.sql          # Schema TimescaleDB
 ├── infra/
@@ -172,6 +175,7 @@ iot-bigdata-project/
 - Python 3.12+
 - Java 21
 - Apache Spark 3.5.8
+- AWS CLI (untuk ephemeral worker automation)
 
 > Dikembangkan di WSL Ubuntu 24.04 (lokal) dan Amazon Linux 2023 (EC2).
 
@@ -216,16 +220,13 @@ cd spark-jobs && source .venv/bin/activate
 # Export DB → S3
 python export_to_parquet.py
 
-# Spark job local mode
+# Spark job local mode (tanpa worker)
 spark-submit \
   --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261 \
   batch_analytics.py s3://iot-bigdata-datalake-kagebyo/raw/<file>.parquet 0
 
-# Spark job cluster mode (jalankan Spark master dulu)
-spark-submit \
-  --master spark://10.0.1.89:7077 \
-  --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261 \
-  batch_analytics.py s3://iot-bigdata-datalake-kagebyo/raw/<file>.parquet 1
+# Spark job dengan ephemeral worker (otomatis launch + terminate)
+./run_with_worker.sh s3://iot-bigdata-datalake-kagebyo/raw/<file>.parquet 2
 ```
 
 ---
@@ -241,8 +242,8 @@ spark-submit \
 | 3     | Deploy ke EC2 + replikasi DB                    | ✅ Selesai  |
 | 4     | Integrasi S3 sebagai Data Lake                  | ✅ Selesai  |
 | 5     | Multi-node Spark (ephemeral workers)            | ✅ Selesai  |
-| 6     | Automasi ephemeral worker                       | 🔧 On going |
-| 7     | Evaluasi & analisis hasil scaling               | 🔜 Belum    |
+| 6     | Automasi ephemeral worker                       | ✅ Selesai  |
+| 7     | Evaluasi & analisis hasil scaling               | 🔧 On going |
 
 ---
 
@@ -252,6 +253,7 @@ spark-submit \
 - `grafana/provisioning/alerting/contact-points.yaml` tidak di-commit. Gunakan `.example` sebagai acuan.
 - `db/init.sql` hanya dieksekusi sekali saat container pertama dibuat. Reset: `docker compose down -v`.
 - `spark-jobs/data/` tidak di-commit ke git.
-- Spark job di Node 2 selalu write ke DB Primary (Node 1) dan standby PostgreSQL bersifat read-only.
+- Spark job di Node 2 selalu write ke DB Primary (Node 1), standby PostgreSQL bersifat read-only.
 - S3 access menggunakan IAM Role, tidak ada credentials yang disimpan di kode.
-- Worker node bersifat ephemeral — di-launch saat job, di-terminate setelah selesai.
+- Worker node bersifat ephemeral — di-launch otomatis saat job, di-terminate setelah selesai.
+- Custom AMI worker (Amazon Linux 2023 + Java 21 + Spark 3.5.8)
