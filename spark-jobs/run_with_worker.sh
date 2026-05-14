@@ -67,62 +67,72 @@ chmod 600 /home/ec2-user/.ssh/authorized_keys
 EOF
 )
 
+# Array untuk simpan instance IDs dan IPs
+INSTANCE_IDS=()
+WORKER_IPS=()
+
 # ============================================================
-# Step 1 — Launch EC2 worker
+# Step 1 — Launch semua EC2 worker
 # ============================================================
 echo ""
-echo "[1/5] Launching EC2 worker..."
+echo "[1/5] Launching $WORKER_COUNT EC2 worker(s)..."
 
-INSTANCE_ID=$(aws ec2 run-instances \
-    --region "$REGION" \
-    --image-id "$AMI_ID" \
-    --instance-type "$INSTANCE_TYPE" \
-    --subnet-id "$SUBNET_ID" \
-    --security-group-ids "$SG_ID" \
-    --user-data "$USER_DATA" \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$WORKER_NAME}]" \
-    --block-device-mappings "DeviceName=/dev/xvda,Ebs={VolumeSize=8,VolumeType=gp3,DeleteOnTermination=true}" \
-    --query 'Instances[0].InstanceId' \
-    --output text)
-
-echo "Instance ID: $INSTANCE_ID"
+for i in $(seq 1 "$WORKER_COUNT"); do
+    INSTANCE_ID=$(aws ec2 run-instances \
+        --region "$REGION" \
+        --image-id "$AMI_ID" \
+        --instance-type "$INSTANCE_TYPE" \
+        --subnet-id "$SUBNET_ID" \
+        --security-group-ids "$SG_ID" \
+        --user-data "$USER_DATA" \
+        --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$WORKER_NAME-$i}]" \
+        --block-device-mappings "DeviceName=/dev/xvda,Ebs={VolumeSize=8,VolumeType=gp3,DeleteOnTermination=true}" \
+        --query 'Instances[0].InstanceId' \
+        --output text)
+    echo "  Worker $i — Instance ID: $INSTANCE_ID"
+    INSTANCE_IDS+=("$INSTANCE_ID")
+done
 
 # ============================================================
-# Step 2 — Tunggu instance running
+# Step 2 — Tunggu semua instance running
 # ============================================================
 echo ""
-echo "[2/5] Waiting for instance to be running..."
+echo "[2/5] Waiting for all instances to be running..."
 
 aws ec2 wait instance-running \
     --region "$REGION" \
-    --instance-ids "$INSTANCE_ID"
+    --instance-ids "${INSTANCE_IDS[@]}"
 
-# Ambil private IP
-WORKER_IP=$(aws ec2 describe-instances \
-    --region "$REGION" \
-    --instance-ids "$INSTANCE_ID" \
-    --query 'Reservations[0].Instances[0].PrivateIpAddress' \
-    --output text)
+# Ambil private IP semua worker
+for INSTANCE_ID in "${INSTANCE_IDS[@]}"; do
+    WORKER_IP=$(aws ec2 describe-instances \
+        --region "$REGION" \
+        --instance-ids "$INSTANCE_ID" \
+        --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+        --output text)
+    echo "  $INSTANCE_ID → $WORKER_IP"
+    WORKER_IPS+=("$WORKER_IP")
+done
 
-echo "Worker IP  : $WORKER_IP"
-
-# Tunggu SSH ready (instance running != SSH ready)
 echo "Waiting for SSH to be ready..."
 sleep 30
 
 # ============================================================
-# Step 3 — Start Spark worker via SSH
+# Step 3 — Start Spark worker di semua instance
 # ============================================================
 echo ""
-echo "[3/5] Starting Spark worker..."
+echo "[3/5] Starting Spark workers..."
 
-ssh -i ~/.ssh/iot-worker-key \
-    -o StrictHostKeyChecking=no \
-    -o ConnectTimeout=30 \
-    ec2-user@"$WORKER_IP" \
-    "SPARK_LOCAL_IP=$WORKER_IP $SPARK_HOME/sbin/start-worker.sh $SPARK_MASTER"
+for WORKER_IP in "${WORKER_IPS[@]}"; do
+    ssh -i ~/.ssh/iot-worker-key \
+        -o StrictHostKeyChecking=no \
+        -o ConnectTimeout=30 \
+        ec2-user@"$WORKER_IP" \
+        "SPARK_LOCAL_IP=$WORKER_IP $SPARK_HOME/sbin/start-worker.sh $SPARK_MASTER"
+    echo "  Worker $WORKER_IP started"
+done
 
-echo "Spark worker started, waiting for registration..."
+echo "Waiting for workers to register..."
 sleep 15
 
 # ============================================================
@@ -144,13 +154,14 @@ spark-submit \
 # Step 5 — Terminate EC2 worker
 # ============================================================
 echo ""
-echo "[5/5] Terminating EC2 worker..."
+echo "[5/5] Terminating EC2 worker(s)..."
 
 aws ec2 terminate-instances \
     --region "$REGION" \
-    --instance-ids "$INSTANCE_ID"
+    --instance-ids "${INSTANCE_IDS[@]}" \
+    --query 'TerminatingInstances[*].{ID:InstanceId,State:CurrentState.Name}' \
+    --output table
 
-echo "Instance $INSTANCE_ID terminating..."
 echo ""
 echo "============================================"
 echo "Done."
