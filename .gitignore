@@ -1,5 +1,6 @@
 # Credentials - jangan pernah di-commit
 infra/.env
+infra/mosquitto/passwd
 
 # Python
 __pycache__/

@@ -18,6 +18,24 @@
 set -e  # exit kalau ada command yang gagal
 
 # ============================================================
+# Cleanup trap — pastikan worker di-terminate walau script gagal
+# ============================================================
+INSTANCE_IDS=()
+
+cleanup() {
+    if [ ${#INSTANCE_IDS[@]} -gt 0 ]; then
+        echo ""
+        echo "[CLEANUP] Terminating ${#INSTANCE_IDS[@]} worker(s)..."
+        aws ec2 terminate-instances \
+            --region "$REGION" \
+            --instance-ids "${INSTANCE_IDS[@]}" \
+            --query 'TerminatingInstances[*].{ID:InstanceId,State:CurrentState.Name}' \
+            --output table
+    fi
+}
+trap cleanup EXIT
+
+# ============================================================
 # Load konfigurasi dari .env
 # ============================================================
 ENV_PATH="$(dirname "$0")/../infra/.env"
@@ -67,8 +85,7 @@ chmod 600 /home/ec2-user/.ssh/authorized_keys
 EOF
 )
 
-# Array untuk simpan instance IDs dan IPs
-INSTANCE_IDS=()
+# Array untuk simpan IPs
 WORKER_IPS=()
 
 # ============================================================
@@ -151,18 +168,9 @@ spark-submit \
     "$WORKER_COUNT"
 
 # ============================================================
-# Step 5 — Terminate EC2 worker
+# Step 5 — Done (cleanup trap akan terminate workers otomatis)
 # ============================================================
 echo ""
-echo "[5/5] Terminating EC2 worker(s)..."
-
-aws ec2 terminate-instances \
-    --region "$REGION" \
-    --instance-ids "${INSTANCE_IDS[@]}" \
-    --query 'TerminatingInstances[*].{ID:InstanceId,State:CurrentState.Name}' \
-    --output table
-
-echo ""
 echo "============================================"
-echo "Done."
+echo "Job selesai. Workers akan di-terminate oleh cleanup trap."
 echo "============================================"

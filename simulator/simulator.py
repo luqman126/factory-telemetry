@@ -168,6 +168,13 @@ def run(interval_sec: float = 2.0) -> None:
     broker_port = int(os.getenv("MQTT_BROKER_PORT", 1883))
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+
+    # Auth jika dikonfigurasi
+    mqtt_user = os.getenv("MQTT_USER")
+    mqtt_pass = os.getenv("MQTT_PASSWORD")
+    if mqtt_user and mqtt_pass:
+        client.username_pw_set(mqtt_user, mqtt_pass)
+
     client.connect(broker_host, broker_port, keepalive=60)
     client.loop_start()
 

@@ -66,8 +66,13 @@ def save_job_log(engine, job_id, started_at, finished_at, worker_count,
         conn.commit()
 
 
-def save_analytics(engine, rows, job_id):
-    sql = text("""
+def save_analytics(engine, rows, job_id, window_start, window_end):
+    # Delete previous results for this window (idempotent re-run)
+    delete_sql = text("""
+        DELETE FROM analytics_results
+        WHERE window_start = :window_start AND window_end = :window_end
+    """)
+    insert_sql = text("""
         INSERT INTO analytics_results
             (computed_at, window_start, window_end,
              device_id, location, metric_name, metric_value, job_id)
@@ -76,12 +81,18 @@ def save_analytics(engine, rows, job_id):
              :device_id, :location, :metric_name, :metric_value, :job_id)
     """)
     with engine.connect() as conn:
-        conn.execute(sql, rows)
+        conn.execute(delete_sql, {"window_start": window_start, "window_end": window_end})
+        conn.execute(insert_sql, rows)
         conn.commit()
 
 
-def save_anomalies(engine, rows):
-    sql = text("""
+def save_anomalies(engine, rows, window_start, window_end):
+    # Delete previous anomalies for this window (idempotent re-run)
+    delete_sql = text("""
+        DELETE FROM anomaly_events
+        WHERE event_time >= :window_start AND event_time <= :window_end
+    """)
+    insert_sql = text("""
         INSERT INTO anomaly_events
             (event_time, device_id, location,
              sensor_type, observed_value, threshold_value, severity)
@@ -90,7 +101,8 @@ def save_anomalies(engine, rows):
              :sensor_type, :observed_value, :threshold_value, :severity)
     """)
     with engine.connect() as conn:
-        conn.execute(sql, rows)
+        conn.execute(delete_sql, {"window_start": window_start, "window_end": window_end})
+        conn.execute(insert_sql, rows)
         conn.commit()
 
 
@@ -103,11 +115,14 @@ def run(parquet_path: str, worker_count: int = 0):
     logger.info(f"Workers  : {worker_count}")
 
     # --------------------------------------------------------
-    # Init Spark — local mode + S3A config
+    # Init Spark — configurable master + S3A config
     # --------------------------------------------------------
+    spark_master = os.getenv("SPARK_MASTER_URL", "local[*]")
+    logger.info(f"Spark master: {spark_master}")
+
     spark = SparkSession.builder \
         .appName(f"iot_analytics_{job_id}") \
-        .master("local[*]") \
+        .master(spark_master) \
         .config("spark.hadoop.fs.s3a.impl",
                 "org.apache.hadoop.fs.s3a.S3AFileSystem") \
         .config("spark.hadoop.fs.s3a.aws.credentials.provider",
@@ -193,11 +208,11 @@ def run(parquet_path: str, worker_count: int = 0):
     # --------------------------------------------------------
     engine = get_engine()
     try:
-        save_analytics(engine, analytics_rows, job_id)
+        save_analytics(engine, analytics_rows, job_id, window_start, window_end)
         logger.info(f"Analytics tersimpan: {len(analytics_rows)} metric")
 
         if anomaly_rows:
-            save_anomalies(engine, anomaly_rows)
+            save_anomalies(engine, anomaly_rows, window_start, window_end)
             logger.info(f"Anomali tersimpan: {len(anomaly_rows)} event")
         else:
             logger.info("Tidak ada anomali terdeteksi")
