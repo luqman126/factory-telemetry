@@ -7,10 +7,14 @@ Usage:
 """
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-RESULTS_DIR = Path(__file__).parent / "results"
+_project_root = Path(os.environ.get("PROJECT_ROOT", "")).resolve()
+if not (_project_root / ".git").exists():
+    _project_root = Path(__file__).resolve().parents[1]
+RESULTS_DIR = _project_root / "benchmarks" / "results"
 
 
 def load_json(filename):

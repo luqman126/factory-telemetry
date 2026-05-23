@@ -21,7 +21,9 @@ import psycopg2
 from dotenv import dotenv_values
 
 # Load env from infra/.env
-_project_root = Path(os.environ.get("PROJECT_ROOT", Path(__file__).parents[1]))
+_project_root = Path(os.environ.get("PROJECT_ROOT", "")).resolve()
+if not (_project_root / ".git").exists():
+    _project_root = Path(__file__).resolve().parents[1]
 ENV_PATH = _project_root / "infra" / ".env"
 env = dotenv_values(ENV_PATH)
 
@@ -37,7 +39,7 @@ def get_git_commit():
     try:
         return subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
-            cwd=_project_root, text=True
+            cwd=str(_project_root), text=True, stderr=subprocess.DEVNULL
         ).strip()
     except Exception:
         return "unknown"

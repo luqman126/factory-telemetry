@@ -19,14 +19,14 @@ import pandas as pd
 import psycopg2
 from dotenv import dotenv_values
 
-ENV_PATH = Path(__file__).parents[1] / "infra" / ".env"
-if not ENV_PATH.exists():
-    # Running from temp dir during benchmark
-    ENV_PATH = Path(os.environ.get("PROJECT_ROOT", Path(__file__).parents[1])) / "infra" / ".env"
+PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", "")).resolve()
+if not (PROJECT_ROOT / ".git").exists():
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+ENV_PATH = PROJECT_ROOT / "infra" / ".env"
 env = dotenv_values(ENV_PATH)
 
-PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", Path(__file__).parents[1]))
-PARQUET_PATH = Path(__file__).parent / "results" / "test_data.parquet"
+PARQUET_PATH = PROJECT_ROOT / "benchmarks" / "results" / "test_data.parquet"
 NUM_TEST_ROWS = 100
 
 
@@ -34,7 +34,7 @@ def get_git_commit():
     try:
         return subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
-            cwd=PROJECT_ROOT, text=True
+            cwd=str(PROJECT_ROOT), text=True, stderr=subprocess.DEVNULL
         ).strip()
     except Exception:
         return "unknown"
@@ -44,7 +44,7 @@ def get_branch():
     try:
         return subprocess.check_output(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=PROJECT_ROOT, text=True
+            cwd=str(PROJECT_ROOT), text=True, stderr=subprocess.DEVNULL
         ).strip()
     except Exception:
         return "unknown"

@@ -79,7 +79,7 @@ start_backend() {
     source .venv/bin/activate
     uvicorn app.main:app --host 0.0.0.0 --port 8000 > /dev/null 2>&1 &
     BACKEND_PID=$!
-    cd "$SCRIPT_DIR"
+    cd "$PROJECT_ROOT"
     wait_for_backend
 }
 
@@ -170,6 +170,7 @@ echo "============================================"
 echo "  BENCHMARKING: main branch"
 echo "============================================"
 
+cd "$PROJECT_ROOT"
 git checkout main
 start_backend
 
@@ -188,6 +189,7 @@ echo "============================================"
 echo "  BENCHMARKING: feature/agent-improvements"
 echo "============================================"
 
+cd "$PROJECT_ROOT"
 git checkout feature/agent-improvements
 start_backend
 

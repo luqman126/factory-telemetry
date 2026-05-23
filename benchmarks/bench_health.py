@@ -11,21 +11,22 @@ import json
 import os
 import subprocess
 import time
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-import requests
-
 HEALTH_URL = "http://localhost:8000/health"
 NUM_REQUESTS = 10
-_project_root = Path(os.environ.get("PROJECT_ROOT", Path(__file__).parents[1]))
+_project_root = Path(os.environ.get("PROJECT_ROOT", "")).resolve()
+if not (_project_root / ".git").exists():
+    _project_root = Path(__file__).resolve().parents[1]
 
 
 def get_git_commit():
     try:
         return subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
-            cwd=_project_root, text=True
+            cwd=str(_project_root), text=True, stderr=subprocess.DEVNULL
         ).strip()
     except Exception:
         return "unknown"
@@ -41,10 +42,11 @@ def run_benchmark(output_path: str):
 
     for i in range(NUM_REQUESTS):
         start = time.perf_counter()
-        resp = requests.get(HEALTH_URL)
+        with urllib.request.urlopen(HEALTH_URL) as resp:
+            body = json.loads(resp.read().decode())
         elapsed = (time.perf_counter() - start) * 1000  # ms
         times.append(elapsed)
-        last_body = resp.json()
+        last_body = body
 
     avg_ms = sum(times) / len(times)
     response_fields = list(last_body.keys())
