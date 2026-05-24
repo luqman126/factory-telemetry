@@ -24,23 +24,23 @@ Node 2 (t3.small)
 ## Proposed Architecture
 
 ```
-Node 1 — Application Layer (c7i-flex.large)
+iot-bigdata-applayer-1 — Application Layer (c7i-flex.large)
 ├── FastAPI Backend
 ├── MQTT Broker
 ├── Grafana
 └── Spark Master
 
-Node 2 — Database Primary (t3.small)
+iot-bigdata-datalayer-1 — Database Primary (t3.small)
 └── PostgreSQL Primary (TimescaleDB)
 
-Node 3 — Database Replica (t3.small)
+iot-bigdata-datalayer-2 — Database Replica (t3.small)
 └── PostgreSQL Standby Replica
 
-Ephemeral Worker Nodes (t3.small)
+iot-bigdata-worker-x — Ephemeral (t3.small)
 └── Spark Workers / Executors
 ```
 
-> Node 3 menggunakan instance type yang sama dengan Node 2 agar dapat dipromote menjadi primary tanpa degradasi performa.
+> Naming convention: `iot-bigdata-{layer}-{index}`. Disiapkan untuk horizontal scaling.
 
 ---
 
@@ -119,19 +119,19 @@ primary_slot_name = 'node3_replica_slot'
 ### Normal State
 
 ```
-Node 2 → PRIMARY (read/write)
-Node 3 → REPLICA (read-only, streaming replication)
+iot-bigdata-datalayer-1 → PRIMARY (read/write)
+iot-bigdata-datalayer-2 → REPLICA (read-only, streaming replication)
 ```
 
-### Failure Scenario — Node 2 down
+### Failure Scenario — datalayer-1 down
 
 | Step | Action | Verification |
 |------|--------|--------------|
 | 1 | Verifikasi primary benar-benar down | SSH attempt, health check |
-| 2 | Promote Node 3: `pg_ctl promote` atau `pg_promote()` | Check `pg_is_in_recovery()` returns false |
-| 3 | Update connection config di Node 1 (`.env` files) | Test connection dari backend |
-| 4 | Restart services di Node 1 | Verify data flow end-to-end |
-| 5 | Rebuild Node 2 sebagai replica baru (`pg_basebackup` dari Node 3) | Check `pg_stat_replication` |
+| 2 | Promote datalayer-2: `pg_ctl promote` atau `pg_promote()` | Check `pg_is_in_recovery()` returns false |
+| 3 | Update `POSTGRES_HOST` di `infra/.env` pada applayer-1 | Test connection dari backend |
+| 4 | Restart services di applayer-1 | Verify data flow end-to-end |
+| 5 | Rebuild datalayer-1 sebagai replica baru (`pg_basebackup` dari datalayer-2) | Check `pg_stat_replication` |
 
 ### Services yang perlu di-update saat failover:
 
@@ -240,9 +240,8 @@ Jika migrasi gagal di phase manapun:
 ### Execution Order
 
 ```
-1. SSH Node 2 → sudo ./provision-db-primary.sh <db> <user> <pass> <node3_ip>
-2. SSH Node 1 → ./migrate-data.sh iot_timescaledb <db> <user> <node2_ip>
-3. SSH Node 3 → sudo ./provision-db-replica.sh <node2_ip> <pass>
-4. Node 1     → Update .env (DB_HOST=<node2_ip>), docker compose up -d
-5. Validate   → Grafana connects, backend writes, replication active
+1. SSH datalayer-1  → sudo ./provision-db-primary.sh <db> <user> <pass> <datalayer-2_ip>
+2. SSH datalayer-2  → sudo ./provision-db-replica.sh <datalayer-1_ip> <pass>
+3. SSH applayer-1   → Update .env (POSTGRES_HOST=<datalayer-1_ip>), docker compose up -d
+4. Validate         → Grafana connects, backend writes, replication active
 ```

@@ -249,10 +249,68 @@ sudo -u postgres psql -d <db_name> -c "DELETE FROM devices WHERE device_id = 'te
 ## Topology Summary
 
 ```
-Node 1 (App Layer)
+iot-bigdata-applayer-1 (Node 1 — App Layer)
     │
     │  TCP 5432
     ▼
-Node 2 (DB Primary) ──── streaming replication ────► Node 3 (DB Replica)
-    10.0.1.247                                         10.0.1.78
+iot-bigdata-datalayer-1 (Node 2 — DB Primary) ─── streaming replication ───► iot-bigdata-datalayer-2 (Node 3 — DB Replica)
+    10.0.1.247                                                                  10.0.1.78
+```
+
+### Naming Convention
+
+```
+iot-bigdata-{layer}-{index}
+```
+
+| Pattern | Contoh | Keterangan |
+|---------|--------|------------|
+| `iot-bigdata-applayer-x` | `iot-bigdata-applayer-1` | Application layer (FastAPI, MQTT, Grafana, Spark Master) |
+| `iot-bigdata-datalayer-x` | `iot-bigdata-datalayer-1` | Database layer (PostgreSQL Primary/Replica) |
+| `iot-bigdata-worker-x` | `iot-bigdata-worker-1` | Ephemeral Spark workers |
+
+> Index dimulai dari 1. Naming disiapkan untuk horizontal scaling (pool) di masa depan.
+
+---
+
+## Post-Setup Issues & Fixes
+
+### Grafana alert rule error setelah fresh deploy
+
+**Gejala:** Log Grafana menampilkan `the result-set has errors that can be retried` berulang.
+
+**Penyebab:** Alert rules query `sensor_readings` yang masih kosong atau belum punya data dalam time range yang di-evaluate. Grafana alert evaluator retry terus sampai data tersedia.
+
+**Solusi:** Bukan error kritis — hilang sendiri setelah data cukup terkumpul (beberapa menit setelah simulator jalan). Tidak perlu action.
+
+### Grafana contact-points.yaml missing
+
+**Gejala:** Grafana gagal start dengan error `receiver 'telegram-alert' does not exist`.
+
+**Penyebab:** `contact-points.yaml` tidak di-commit ke git (berisi credentials). Policies reference contact point yang belum ada.
+
+**Solusi:**
+```bash
+cd grafana/provisioning/alerting/
+cp contact-points.yaml.example contact-points.yaml
+# Isi TELEGRAM_BOT_TOKEN dan TELEGRAM_CHAT_ID
+docker compose restart grafana
+```
+
+### Mosquitto passwd file menjadi directory
+
+**Gejala:** `Error: /mosquitto/config/passwd is not a file`
+
+**Penyebab:** Docker auto-create mount target sebagai directory ketika file belum ada di host.
+
+**Solusi:**
+```bash
+rm -rf mosquitto/passwd
+touch mosquitto/passwd
+source .env
+docker run --rm -v $(pwd)/mosquitto:/mosquitto/config eclipse-mosquitto:2 \
+    mosquitto_passwd -b /mosquitto/config/passwd "$MQTT_USER" "$MQTT_PASSWORD"
+sudo chown root:root mosquitto/passwd
+sudo chmod 644 mosquitto/passwd
+docker compose restart mosquitto
 ```
