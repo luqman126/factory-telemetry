@@ -80,7 +80,7 @@ echo "============================================"
 # ============================================================
 USER_DATA=$(cat <<'EOF'
 #!/bin/bash
-echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICTt9MoqRKuDLeEWGis1VBzNnsBu27FnW+4Q3d49e29l ec2-user@ip-10-0-1-89.ap-southeast-1.compute.internal" >> /home/ec2-user/.ssh/authorized_keys
+echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICR+quASFWze7lxSJHLhJrNVy54tHnMD1Yo3a60hty4Z applayer-1-spark" >> /home/ec2-user/.ssh/authorized_keys
 chmod 600 /home/ec2-user/.ssh/authorized_keys
 EOF
 )
