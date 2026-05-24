@@ -145,6 +145,18 @@ def run(parquet_path: str, worker_count: int = 0):
     total_records = df.count()
     logger.info(f"Records  : {total_records}")
 
+    # --------------------------------------------------------
+    # Smart repartition — hanya kalau data cukup besar
+    # Threshold: > 50K records dan ada worker aktif
+    # Tanpa ini, 1 Parquet file = 1 partition = 1 task = worker idle
+    # --------------------------------------------------------
+    if total_records > 50_000 and worker_count > 0:
+        num_partitions = worker_count * 2  # 2 tasks per core
+        df = df.repartition(num_partitions)
+        logger.info(f"Repartitioned to {num_partitions} partitions")
+    else:
+        logger.info(f"Skipping repartition (records={total_records}, workers={worker_count})")
+
     # Window waktu dari data
     window_start = df.agg(F.min("time")).collect()[0][0]
     window_end   = df.agg(F.max("time")).collect()[0][0]
