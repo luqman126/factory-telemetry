@@ -22,10 +22,10 @@ fi
 PRIMARY_IP="$1"
 DB_PASSWORD="$2"
 
-echo "=== [1/5] Installing PostgreSQL 16 ==="
-dnf install -y postgresql16-server postgresql16-contrib
+echo "=== [1/6] Installing PostgreSQL 16 ==="
+dnf install -y postgresql16-server postgresql16-contrib postgresql16-private-devel
 
-echo "=== [2/5] Installing TimescaleDB ==="
+echo "=== [2/6] Installing TimescaleDB ==="
 cat > /etc/yum.repos.d/timescaledb.repo <<'EOF'
 [timescaledb]
 name=TimescaleDB
@@ -35,7 +35,14 @@ enabled=1
 EOF
 dnf install -y timescaledb-2-postgresql-16
 
-echo "=== [3/5] Base backup from primary ==="
+echo "=== [3/6] Fixing TimescaleDB paths (Amazon Linux 2023 compatibility) ==="
+ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.so /usr/lib64/pgsql/
+ln -sf /usr/lib64/timescaledb-pg16/timescaledb-2.27.1.so /usr/lib64/pgsql/
+ln -sf /usr/lib64/timescaledb-pg16/timescaledb-tsl-2.27.1.so /usr/lib64/pgsql/
+ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.control /usr/share/pgsql/extension/
+ln -sf /usr/lib64/timescaledb-pg16/timescaledb--*.sql /usr/share/pgsql/extension/
+
+echo "=== [4/6] Base backup from primary ==="
 PGDATA="/var/lib/pgsql/data"
 
 # Remove default data dir (initdb not needed for replica)
@@ -52,12 +59,8 @@ PGPASSWORD="$DB_PASSWORD" pg_basebackup \
 chown -R postgres:postgres "$PGDATA"
 chmod 700 "$PGDATA"
 
-echo "=== [4/5] Configuring replica ==="
-# pg_basebackup with -R already creates standby.signal and primary_conninfo in postgresql.auto.conf
-# Just ensure TimescaleDB is loaded
-timescaledb-tune --pg-config=/usr/bin/pg_config --yes --quiet
-
-# Ensure it stays read-only
+echo "=== [5/6] Configuring replica ==="
+# pg_basebackup with -R already creates standby.signal and primary_conninfo
 cat >> "$PGDATA/postgresql.conf" <<EOF
 
 # --- Replica settings ---
@@ -65,7 +68,7 @@ hot_standby = on
 primary_slot_name = 'node3_replica_slot'
 EOF
 
-echo "=== [5/5] Starting PostgreSQL (replica mode) ==="
+echo "=== [6/6] Starting PostgreSQL (replica mode) ==="
 systemctl enable postgresql
 systemctl start postgresql
 
@@ -76,4 +79,4 @@ echo "  sudo -u postgres psql -c 'SELECT pg_is_in_recovery();'"
 echo "  -- Should return 't'"
 echo ""
 echo "On primary (Node 2), verify with:"
-echo "  sudo -u postgres psql -c 'SELECT * FROM pg_stat_replication;'"
+echo "  sudo -u postgres psql -c 'SELECT client_addr, state FROM pg_stat_replication;'"

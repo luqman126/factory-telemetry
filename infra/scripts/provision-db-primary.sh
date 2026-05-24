@@ -22,12 +22,11 @@ DB_USER="$2"
 DB_PASSWORD="$3"
 REPLICA_IP="$4"
 
-echo "=== [1/6] Installing PostgreSQL 16 ==="
-dnf install -y postgresql16-server postgresql16-contrib
+echo "=== [1/7] Installing PostgreSQL 16 ==="
+dnf install -y postgresql16-server postgresql16-contrib postgresql16-private-devel
 postgresql-setup --initdb
 
-echo "=== [2/6] Installing TimescaleDB ==="
-# TimescaleDB RPM repo for Amazon Linux 2023
+echo "=== [2/7] Installing TimescaleDB ==="
 cat > /etc/yum.repos.d/timescaledb.repo <<'EOF'
 [timescaledb]
 name=TimescaleDB
@@ -37,14 +36,29 @@ enabled=1
 EOF
 dnf install -y timescaledb-2-postgresql-16
 
-echo "=== [3/6] Configuring PostgreSQL ==="
+echo "=== [3/7] Fixing TimescaleDB paths (Amazon Linux 2023 compatibility) ==="
+# Amazon Linux repo installs PostgreSQL libs/extensions to different paths than PGDG.
+# TimescaleDB package (built for el9/PGDG) puts files in non-standard locations.
+# Fix: symlink to where Amazon Linux PostgreSQL expects them.
+
+# Extension .so files
+ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.so /usr/lib64/pgsql/
+ln -sf /usr/lib64/timescaledb-pg16/timescaledb-2.27.1.so /usr/lib64/pgsql/
+ln -sf /usr/lib64/timescaledb-pg16/timescaledb-tsl-2.27.1.so /usr/lib64/pgsql/
+
+# Extension control file
+ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.control /usr/share/pgsql/extension/
+
+# Extension SQL files
+ln -sf /usr/lib64/timescaledb-pg16/timescaledb--*.sql /usr/share/pgsql/extension/
+
+echo "=== [4/7] Configuring PostgreSQL ==="
 PGDATA="/var/lib/pgsql/data"
 
-# TimescaleDB tuning
-timescaledb-tune --pg-config=/usr/bin/pg_config --yes --quiet
-
-# Replication settings
 cat >> "$PGDATA/postgresql.conf" <<EOF
+
+# --- TimescaleDB ---
+shared_preload_libraries = 'timescaledb'
 
 # --- Replication (Primary) ---
 wal_level = replica
@@ -54,7 +68,6 @@ wal_keep_size = 256MB
 listen_addresses = '*'
 EOF
 
-# pg_hba.conf — allow app node + replica
 cat >> "$PGDATA/pg_hba.conf" <<EOF
 
 # App node (Node 1) — password auth
@@ -64,33 +77,33 @@ host    all             ${DB_USER}       10.0.1.0/24       scram-sha-256
 host    replication     replicator       ${REPLICA_IP}/32   scram-sha-256
 EOF
 
-echo "=== [4/6] Starting PostgreSQL ==="
+echo "=== [5/7] Starting PostgreSQL ==="
 systemctl enable postgresql
 systemctl start postgresql
 
-echo "=== [5/6] Creating database, user, and replication role ==="
+echo "=== [6/7] Creating database, user, and replication role ==="
 sudo -u postgres psql <<EOF
--- App user
 CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';
 CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};
 GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};
-
--- Replication user
 CREATE USER replicator WITH REPLICATION PASSWORD '${DB_PASSWORD}';
-
--- Replication slot
 SELECT pg_create_physical_replication_slot('node3_replica_slot');
 EOF
 
-echo "=== [6/6] Initializing schema (TimescaleDB + tables) ==="
-sudo -u postgres psql -d "$DB_NAME" <<'SCHEMA'
-CREATE EXTENSION IF NOT EXISTS timescaledb;
-SCHEMA
+echo "=== [7/7] Initializing schema ==="
+sudo -u postgres psql -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
 
-# Run init.sql (copy this file to the node first)
 if [ -f /tmp/init.sql ]; then
     sudo -u postgres psql -d "$DB_NAME" -f /tmp/init.sql
-    echo "Schema initialized from init.sql"
+    # Fix ownership
+    sudo -u postgres psql -d "$DB_NAME" -c "
+        ALTER TABLE sensor_readings OWNER TO ${DB_USER};
+        ALTER TABLE devices OWNER TO ${DB_USER};
+        ALTER TABLE analytics_results OWNER TO ${DB_USER};
+        ALTER TABLE anomaly_events OWNER TO ${DB_USER};
+        ALTER TABLE spark_job_log OWNER TO ${DB_USER};
+    "
+    echo "Schema initialized and ownership set to ${DB_USER}"
 else
     echo "WARNING: /tmp/init.sql not found. Copy db/init.sql to /tmp/init.sql and run:"
     echo "  sudo -u postgres psql -d $DB_NAME -f /tmp/init.sql"
@@ -98,7 +111,4 @@ fi
 
 echo ""
 echo "=== DONE ==="
-echo "Primary is running. Next steps:"
-echo "  1. Copy db/init.sql to this node and run schema if not done above."
-echo "  2. Migrate data (pg_dump from old → pg_restore here)."
-echo "  3. Run provision-db-replica.sh on Node 3."
+echo "Primary is running. Next: run provision-db-replica.sh on Node 3."
