@@ -240,6 +240,41 @@ aws ec2 modify-instance-metadata-options \
     --http-tokens optional
 ```
 
+### Issue 9: Worker tidak bisa akses S3 (stuck di Stage 0 read)
+
+**Gejala:** Worker registered, executor running, tapi Stage 0 (parquet read) tidak progress. CPU executor idle (~2%), `tasks 0/1`, `bytes read 0`.
+
+**Diagnosa:** SSH ke worker, test akses S3:
+```bash
+ssh ec2-user@<worker_ip> "aws s3 ls s3://<bucket>/ --region ap-southeast-1"
+# Stuck/timeout → worker tidak bisa reach S3 endpoint
+```
+
+**Penyebab:** Worker subnet tidak auto-assign public IP, dan tidak ada:
+- NAT Gateway (untuk private subnet outbound)
+- VPC Endpoint untuk S3 (gateway endpoint)
+
+S3 endpoint butuh internet route. Tanpa public IP/NAT/VPC endpoint, worker tidak bisa keluar.
+
+**Solusi (pilih salah satu):**
+
+1. **Enable subnet auto-assign public IP** (paling cepat):
+   ```bash
+   aws ec2 modify-subnet-attribute \
+       --subnet-id <subnet_id> \
+       --map-public-ip-on-launch
+   ```
+
+2. **Buat VPC Endpoint untuk S3** (lebih clean, gratis, tidak butuh public IP):
+   ```bash
+   aws ec2 create-vpc-endpoint \
+       --vpc-id <vpc_id> \
+       --service-name com.amazonaws.ap-southeast-1.s3 \
+       --route-table-ids <route_table_id>
+   ```
+
+3. **Launch worker dengan `--associate-public-ip-address`** flag eksplisit di `aws ec2 run-instances`.
+
 ---
 
 ## Benchmark Procedure

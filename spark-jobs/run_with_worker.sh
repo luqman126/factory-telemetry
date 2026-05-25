@@ -99,8 +99,7 @@ for i in $(seq 1 "$WORKER_COUNT"); do
         --region "$REGION" \
         --image-id "$AMI_ID" \
         --instance-type "$INSTANCE_TYPE" \
-        --subnet-id "$SUBNET_ID" \
-        --security-group-ids "$SG_ID" \
+        --network-interfaces "AssociatePublicIpAddress=true,DeviceIndex=0,SubnetId=$SUBNET_ID,Groups=$SG_ID" \
         --iam-instance-profile "Name=$WORKER_IAM_PROFILE" \
         --metadata-options "HttpTokens=optional,HttpEndpoint=enabled" \
         --user-data "$USER_DATA" \
