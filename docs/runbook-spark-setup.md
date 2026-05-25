@@ -258,22 +258,156 @@ S3 endpoint butuh internet route. Tanpa public IP/NAT/VPC endpoint, worker tidak
 
 **Solusi (pilih salah satu):**
 
-1. **Enable subnet auto-assign public IP** (paling cepat):
+1. **Enable subnet auto-assign public IP**:
    ```bash
    aws ec2 modify-subnet-attribute \
        --subnet-id <subnet_id> \
        --map-public-ip-on-launch
    ```
 
-2. **Buat VPC Endpoint untuk S3** (lebih clean, gratis, tidak butuh public IP):
-   ```bash
-   aws ec2 create-vpc-endpoint \
-       --vpc-id <vpc_id> \
-       --service-name com.amazonaws.ap-southeast-1.s3 \
-       --route-table-ids <route_table_id>
-   ```
+2. **Launch worker dengan `--network-interfaces` flag** yang explicit set `AssociatePublicIpAddress=true` (sudah dipakai di `run_with_worker.sh`).
 
-3. **Launch worker dengan `--associate-public-ip-address`** flag eksplisit di `aws ec2 run-instances`.
+3. **Buat VPC Endpoint untuk S3** (paling clean, gratis, tidak butuh public IP).
+
+### Issue 10: SSH host key conflict saat IP worker recycled
+
+**Gejala:**
+```
+WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!
+Host key verification failed.
+```
+
+**Penyebab:** AWS recycle private IP — worker baru punya IP yang sama dengan worker lama, tapi host key berbeda. SSH client refuse connect.
+
+**Solusi:** Jangan simpan host key. Tambahkan `-o UserKnownHostsFile=/dev/null` di SSH command (sudah dipakai di `run_with_worker.sh`):
+```bash
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ec2-user@<worker_ip>
+```
+
+Atau hapus entry lama:
+```bash
+ssh-keygen -R <worker_ip>
+```
+
+### Issue 11: Disk space habis di worker (No space left on device)
+
+**Gejala:**
+```
+ERROR TaskSchedulerImpl: Lost executor X on Y: Unable to create executor due to No space left on device
+```
+
+**Penyebab:** EBS volume worker terlalu kecil. Spark executor butuh disk untuk:
+- Maven `--packages` jars (~250MB)
+- Shuffle intermediate files (bisa GB untuk dataset besar)
+- Cache spill ke disk kalau memory tidak cukup
+- Spark logs + work directory
+
+EBS 8GB default tidak cukup. Untuk dataset 1M records, **30GB minimum**.
+
+**Solusi:** Naikkan VolumeSize di `aws ec2 run-instances`:
+```bash
+--block-device-mappings "DeviceName=/dev/xvda,Ebs={VolumeSize=30,VolumeType=gp3,DeleteOnTermination=true}"
+```
+
+Untuk dataset > 5M records, pertimbangkan 50GB+ atau instance dengan instance store.
+
+### Issue 12: Heartbeat timeout / Worker lost
+
+**Gejala:**
+```
+WARN HeartbeatReceiver: Removing executor X with no recent heartbeats: 155816 ms exceeds timeout 120000 ms
+ERROR TaskSchedulerImpl: Lost executor X: Executor heartbeat timed out
+```
+
+**Penyebab:** Executor JVM stop-the-world GC pause panjang karena memory pressure. Common di t3.small dengan dataset besar — heap kecil, GC frequent dan lama.
+
+**Solusi:**
+- Naikkan worker instance type (t3.medium 4GB, atau lebih)
+- Naikkan `--executor-memory` proportional dengan instance memory
+- Untuk dataset besar, jangan pakai `df.cache()` (let it spill alami daripada GC thrash)
+- Tune G1GC: `--conf spark.executor.extraJavaOptions="-XX:+UseG1GC -XX:G1HeapRegionSize=4M"`
+
+**Trade-off:** Free-tier hardware ada limit. Untuk benchmark dataset besar (10M+ records), perlu r5.xlarge atau lebih.
+
+---
+
+## Troubleshooting Cheatsheet
+
+### Quick health check
+
+```bash
+# Spark Master alive?
+jps | grep Master
+curl -s localhost:8080 | grep "Spark Master"
+
+# Worker registered?
+curl -s localhost:8080 | grep -E "Alive Workers|Cores"
+
+# Driver running?
+ps aux | grep spark-submit | grep -v grep
+
+# Get current app ID
+APP_ID=$(curl -s localhost:8080/json/ | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['activeapps'][0]['id'] if d['activeapps'] else 'NO_APP')")
+```
+
+### Diagnose stuck job
+
+```bash
+# Stage progress
+curl -s "localhost:4040/api/v1/applications/$APP_ID/stages" | python3 -c "
+import json, sys
+for s in json.load(sys.stdin):
+    print(f\"Stage {s['stageId']} [{s['status']}]: {s.get('numCompleteTasks',0)}/{s.get('numTasks',0)} tasks | input={s.get('inputBytes',0)/1024/1024:.1f}MB\")"
+
+# Worker resource usage
+curl -s localhost:8080/json/ | python3 -c "
+import json, sys
+for w in json.load(sys.stdin)['workers']:
+    print(f\"{w['host']}: cores {w['coresused']}/{w['cores']}, mem {w['memoryused']}/{w['memory']}MB\")"
+
+# Worker disk + load (replace WORKER_IP)
+ssh -i ~/.ssh/iot-worker-key -o UserKnownHostsFile=/dev/null \
+    ec2-user@<WORKER_IP> "df -h / && uptime && free -h"
+```
+
+### Diagnose DB connectivity
+
+```bash
+# Cek koneksi aktif ke DB primary (run di datalayer-1)
+sudo -u postgres psql -c "SELECT client_addr, state FROM pg_stat_activity WHERE client_addr IS NOT NULL;"
+
+# Test connectivity dari worker ke DB
+ssh ec2-user@<worker_ip> "nc -zv 10.0.1.247 5432 -w 5"
+```
+
+### Cleanup stale state
+
+```bash
+# Restart Spark Master (clear stale apps)
+$SPARK_HOME/sbin/stop-master.sh && $SPARK_HOME/sbin/start-master.sh --host 10.0.1.127
+
+# Force terminate orphan workers
+aws ec2 describe-instances --region ap-southeast-1 \
+    --filters "Name=instance-state-name,Values=running" "Name=tag:Name,Values=iot-bigdata-worker-ephemeral-*" \
+    --query 'Reservations[*].Instances[*].InstanceId' --output text | \
+    xargs -I {} aws ec2 terminate-instances --region ap-southeast-1 --instance-ids {}
+```
+
+### Query benchmark results
+
+```bash
+sudo -u postgres psql -d iot_db -c "
+SELECT
+    worker_count,
+    COUNT(*) as samples,
+    ROUND(MIN(execution_time_sec)::numeric, 2) as min_s,
+    ROUND(AVG(execution_time_sec)::numeric, 2) as avg_s,
+    ROUND(MAX(execution_time_sec)::numeric, 2) as max_s
+FROM spark_job_log
+WHERE records_processed = 1000000 AND status = 'SUCCESS'
+GROUP BY worker_count
+ORDER BY worker_count;"
+```
 
 ---
 

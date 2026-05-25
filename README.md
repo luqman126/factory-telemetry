@@ -31,15 +31,15 @@ IoT Device / Simulator
         │
         │  MQTT
         ▼
-Backend (FastAPI)               ← EC2 Node 1, bukan container
+Backend (FastAPI)               ← applayer-1
         │
         │  insert
         ▼
-PostgreSQL + TimescaleDB        ← EC2 Node 1, container
+PostgreSQL + TimescaleDB        ← datalayer-1 (Primary, bare-metal)
         │
         ├── streaming replication
         │         ▼
-        │   PostgreSQL Standby  ← EC2 Node 2, container
+        │   PostgreSQL Standby  ← datalayer-2 (Replica, bare-metal)
         │
         │  export Parquet
         ▼
@@ -47,14 +47,14 @@ Amazon S3 (Data Lake)
         │
         │  s3a:// read
         ▼
-Apache Spark Cluster            ← EC2 Node 2 (master) + ephemeral workers
+Apache Spark Cluster            ← applayer-1 (Master) + ephemeral workers
         │
         │  write hasil
         ▼
-PostgreSQL PRIMARY (Node 1)
+PostgreSQL PRIMARY (datalayer-1)
         │
         ▼
-Grafana Dashboard               ← EC2 Node 1, container
+Grafana Dashboard               ← applayer-1, container
 ```
 
 ---
@@ -65,17 +65,20 @@ Grafana Dashboard               ← EC2 Node 1, container
 AWS ap-southeast-1 (Singapore)
 └── VPC: 10.0.0.0/16
     └── Public Subnet: 10.0.1.0/24
-        ├── Node 1 — c7i-flex.large (primary, always-on)
+        ├── iot-bigdata-applayer-1 — c7i-flex.large (always-on)
         │   ├── FastAPI Backend
         │   ├── Mosquitto MQTT
         │   ├── Grafana + Telegram Alerting
-        │   ├── PostgreSQL PRIMARY (TimescaleDB)
+        │   ├── Spark Master
         │   ├── Cloudflare Tunnel → grafana.cheshub.my.id
         │   └── Tailscale
         │
-        ├── Node 2 — t3.small (standby + analytics, always-on)
+        ├── iot-bigdata-datalayer-1 — t3.small (always-on)
+        │   ├── PostgreSQL PRIMARY (TimescaleDB, bare-metal)
+        │   └── Tailscale
+        │
+        ├── iot-bigdata-datalayer-2 — t3.small (always-on)
         │   ├── PostgreSQL STANDBY (streaming replication)
-        │   ├── Spark Master
         │   └── Tailscale
         │
         └── Worker Nodes — t3.small (ephemeral, otomatis via script)
@@ -121,17 +124,49 @@ Akses:
 
 ## Hasil Eksperimen Spark Scaling
 
-Dataset: 36.057 records (6 hari data sensor, 3 device)
+Eksperimen membandingkan execution time Spark batch job pada arsitektur baru (ARCH-001) dengan berbagai jumlah worker. Job mencakup: read Parquet dari S3, aggregasi per device, anomaly detection, dan distributed JDBC write.
 
-| Skenario          | Workers | Execution Time | Speedup vs baseline |
-|-------------------|---------|----------------|---------------------|
-| Master only       | 0       | 26.04 detik    | baseline            |
-| Master + 1 worker | 1       | 24.58 detik    | 1.06x               |
-| Master + 2 worker | 2       | 23.27 detik    | 1.12x               |
-| Master + 3 worker | 3       | 22.62 detik    | 1.15x               |
-| Master + 4 worker | 4       | 21.51 detik    | 1.21x               |
+### Dataset
 
-**Analisis:** Speedup yang dihasilkan kecil dan menunjukkan pola diminishing returns — setiap worker tambahan memberikan manfaat yang semakin kecil. Ini disebabkan oleh dua faktor utama: dataset yang relatif kecil (36K records) untuk ukuran Spark, dan bottleneck di I/O (baca S3) bukan compute. Distributed computing memberikan manfaat lebih nyata pada dataset skala GB/TB dan job yang compute-intensive.
+- **Records:** 1.000.000
+- **Format:** Parquet di S3 (~64 MB)
+- **Devices:** 20
+- **Time span:** 30 hari
+
+### Hasil
+
+| Skenario        | Workers | Samples | Min      | Avg       | Max       |
+|-----------------|---------|---------|----------|-----------|-----------|
+| Local mode      | 0       | 5       | 27.45 s  | 28.56 s   | 30.33 s   |
+| 1 worker        | 1       | 4       | 42.30 s  | 42.47 s   | 42.63 s   |
+| 2 worker        | 2       | 1*      | 44.13 s  | 44.13 s   | 44.13 s   |
+
+> *) 2 worker memiliki variance ekstrem — beberapa run sukses (~44s), sebagian lain stuck > 5 menit hingga di-batalkan. Hasil ini sendiri menjadi temuan eksperimen.
+
+### Analisis
+
+Pada skala 1M records dengan worker constraint (t3.small, 2GB RAM, 30GB EBS), distributed Spark menunjukkan **negative scaling**:
+
+- Local mode (28s) lebih cepat dari mode dengan worker (42-44s).
+- Penambahan worker dari 1 ke 2 tidak memberikan speedup, justru menambah variance.
+- Run dengan 3 worker konsisten gagal (disk space / executor heartbeat timeout).
+
+Penyebab fundamental:
+
+1. **Network & coordination overhead** — Spark butuh distribute jars (~250MB), shuffle data antar executor, koordinasi master-worker. Untuk dataset 64MB, biaya ini > benefit parallelism.
+2. **JDBC write contention** — `coalesce(2)` + multiple worker = paralel write ke 1 DB primary.
+3. **Hardware constraint** — t3.small (2GB RAM) tidak memberikan ruang yang cukup untuk caching + shuffle, memaksa spill ke disk.
+
+Hasil ini konsisten dengan **Amdahl's Law** — pada serial portion yang signifikan (driver coordination, DB write, S3 I/O), maximum speedup terbatas terlepas dari jumlah worker. Distributed computing baru memberikan ROI positif pada dataset skala GB-TB dan worker dengan resource lebih besar (r5.xlarge+).
+
+### Eksperimen Sebelumnya (arsitektur lama)
+
+Pada arsitektur sebelumnya (DB primary di app node), benchmark dengan 36.057 records menunjukkan diminishing returns dengan speedup terbatas (1.06x - 1.21x). Lihat git history untuk detail.
+
+### Catatan Eksperimen
+
+- Selama proses tuning, ditemukan beberapa issue infrastructure yang berpengaruh signifikan: IMDSv2 incompatibility dengan AWS SDK lama, worker tanpa public IP tidak bisa akses S3, IAM `PassRole` permission, EBS undersized untuk Spark shuffle. Detail di `docs/runbook-spark-setup.md`.
+- Hasil 1 worker sangat konsisten (variance < 1s) menunjukkan setup stabil. Variance hanya muncul pada skenario multi-worker.
 
 ---
 
@@ -146,24 +181,34 @@ iot-bigdata-project/
 │       ├── models/       # Pydantic schema (validasi payload)
 │       ├── routes/       # HTTP endpoint
 │       └── mqtt/         # MQTT consumer (subscribe & proses pesan)
-├── simulator/            # Script simulasi 3 device IoT
+├── simulator/            # Script simulasi device IoT
 ├── spark-jobs/           # PySpark batch analytics
-│   ├── export_to_parquet.py   # Export DB → Parquet → S3
-│   ├── batch_analytics.py     # Spark job: S3 → analytics → DB
-│   ├── run_with_worker.sh     # Automasi ephemeral worker
-│   └── data/parquet/          # Temporary Parquet (tidak di-commit)
+│   ├── export_to_parquet.py    # Export DB → Parquet → S3
+│   ├── batch_analytics.py      # Spark job: S3 → analytics → DB
+│   ├── generate_bulk_data.py   # Generate synthetic dataset untuk benchmark
+│   ├── run_with_worker.sh      # Automasi ephemeral worker
+│   └── data/parquet/           # Temporary Parquet (tidak di-commit)
+├── benchmarks/           # Suite benchmark (ingestion, health, idempotency)
 ├── db/
-│   └── init.sql          # Schema TimescaleDB
+│   └── init.sql          # Schema TimescaleDB (tabel + hypertable + retention)
 ├── infra/
-│   ├── docker-compose.yml
+│   ├── docker-compose.yml      # Mosquitto + Grafana di applayer-1
 │   ├── .env.example
+│   ├── generate_mqtt_passwd.sh # Helper generate Mosquitto password
+│   ├── scripts/                # Provisioning scripts untuk DB nodes
+│   │   ├── provision-db-primary.sh
+│   │   └── provision-db-replica.sh
 │   └── mosquitto/
 │       └── mosquitto.conf
 ├── grafana/
 │   └── provisioning/
-│       ├── datasources/  # TimescaleDB datasource
-│       ├── dashboards/   # Dashboard IoT monitoring
-│       └── alerting/     # Alert rules + contact points (Telegram)
+│       ├── datasources/        # TimescaleDB datasource (env-based config)
+│       ├── dashboards/         # Dashboard IoT monitoring
+│       └── alerting/           # Alert rules + contact points (Telegram)
+├── docs/
+│   ├── ARCH-001-refactor-infra-topology.md   # Ticket arsitektur
+│   ├── runbook-db-setup.md                   # Setup PostgreSQL + TimescaleDB
+│   └── runbook-spark-setup.md                # Setup Spark + benchmarking
 └── README.md
 ```
 
@@ -243,7 +288,9 @@ spark-submit \
 | 4     | Integrasi S3 sebagai Data Lake                  | ✅ Selesai  |
 | 5     | Multi-node Spark (ephemeral workers)            | ✅ Selesai  |
 | 6     | Automasi ephemeral worker                       | ✅ Selesai  |
-| 7     | Evaluasi & analisis hasil scaling               | 🔧 On going |
+| 7     | Evaluasi & analisis hasil scaling               | ✅ Selesai  |
+| 8     | Refactor topology: separate DB layer (ARCH-001) | ✅ Selesai  |
+| 9     | Failover simulation (manual primary failover)   | ⏳ Backlog  |
 
 ---
 
@@ -251,9 +298,11 @@ spark-submit \
 
 - `.env` tidak di-commit ke git. Gunakan `.env.example` sebagai acuan.
 - `grafana/provisioning/alerting/contact-points.yaml` tidak di-commit. Gunakan `.example` sebagai acuan.
-- `db/init.sql` hanya dieksekusi sekali saat container pertama dibuat. Reset: `docker compose down -v`.
+- `infra/mosquitto/passwd` tidak di-commit (berisi hashed password). Generate ulang via `mosquitto_passwd`.
+- `db/init.sql` di datalayer-1 dijalankan sekali via provisioning script. Lihat `docs/runbook-db-setup.md`.
 - `spark-jobs/data/` tidak di-commit ke git.
-- Spark job di Node 2 selalu write ke DB Primary (Node 1), standby PostgreSQL bersifat read-only.
+- Spark job dari applayer-1 selalu write ke DB Primary (datalayer-1), standby PostgreSQL bersifat read-only.
 - S3 access menggunakan IAM Role, tidak ada credentials yang disimpan di kode.
 - Worker node bersifat ephemeral — di-launch otomatis saat job, di-terminate setelah selesai.
-- Custom AMI worker (Amazon Linux 2023 + Java 21 + Spark 3.5.8)
+- Custom AMI worker (Amazon Linux 2023 + Java 21 + Spark 3.5.8).
+- Detail dokumentasi setup di `docs/runbook-db-setup.md` dan `docs/runbook-spark-setup.md`.

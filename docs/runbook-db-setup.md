@@ -314,3 +314,119 @@ sudo chown root:root mosquitto/passwd
 sudo chmod 644 mosquitto/passwd
 docker compose restart mosquitto
 ```
+
+### pg_hba.conf entry literal `<db_user>` tidak ke-replace
+
+**Gejala:** Backend connect gagal dengan `no pg_hba.conf entry for host`. Saat cek, ada entry `<db_user>` literal di pg_hba.conf.
+
+**Penyebab:** Saat setup manual, placeholder `<db_user>` tidak diganti dengan nama user actual.
+
+**Solusi:**
+```bash
+sudo sed -i 's/<db_user>/<actual_username>/' /var/lib/pgsql/data/pg_hba.conf
+sudo -u postgres psql -c "SELECT pg_reload_conf();"
+```
+
+---
+
+## Troubleshooting Cheatsheet
+
+### Cek status PostgreSQL
+
+```bash
+# Service status
+sudo systemctl status postgresql | head -5
+
+# Cek versi + extension
+sudo -u postgres psql -d iot_db -c "SELECT version();"
+sudo -u postgres psql -d iot_db -c "\dx"
+
+# Cek tabel + hypertable
+sudo -u postgres psql -d iot_db -c "\dt"
+sudo -u postgres psql -d iot_db -c "SELECT hypertable_name FROM timescaledb_information.hypertables;"
+
+# Cek users
+sudo -u postgres psql -c "\du"
+```
+
+### Cek status replikasi
+
+**Di primary (datalayer-1):**
+```bash
+sudo -u postgres psql -c "
+SELECT
+    client_addr,
+    state,
+    sent_lsn,
+    replay_lsn,
+    write_lag,
+    replay_lag
+FROM pg_stat_replication;"
+
+# Cek replication slot
+sudo -u postgres psql -c "SELECT slot_name, active, restart_lsn FROM pg_replication_slots;"
+```
+
+**Di replica (datalayer-2):**
+```bash
+# Konfirmasi replica mode
+sudo -u postgres psql -c "SELECT pg_is_in_recovery();"  # harus 't'
+
+# Cek receiver status
+sudo -u postgres psql -c "SELECT * FROM pg_stat_wal_receiver;"
+```
+
+### Test replication end-to-end
+
+```bash
+# Di primary
+sudo -u postgres psql -d iot_db -c "INSERT INTO devices (device_id, device_name, location) VALUES ('test_repl', 'Test', 'test_area');"
+
+# Di replica (tunggu 1-2 detik)
+sudo -u postgres psql -d iot_db -c "SELECT * FROM devices WHERE device_id = 'test_repl';"
+# Harus muncul
+
+# Cleanup di primary
+sudo -u postgres psql -d iot_db -c "DELETE FROM devices WHERE device_id = 'test_repl';"
+```
+
+### Cek koneksi aktif
+
+```bash
+sudo -u postgres psql -c "
+SELECT
+    pid,
+    usename,
+    client_addr,
+    state,
+    LEFT(query, 50) as query_snippet
+FROM pg_stat_activity
+WHERE state IS NOT NULL
+ORDER BY backend_start;"
+```
+
+### Restart PostgreSQL safely
+
+```bash
+# Reload config tanpa restart (untuk pg_hba.conf, postgresql.conf changes)
+sudo -u postgres psql -c "SELECT pg_reload_conf();"
+
+# Full restart (perlu untuk shared_preload_libraries change)
+sudo systemctl restart postgresql
+```
+
+### Replication recovery (kalau replica out-of-sync)
+
+Kalau replication slot inactive lama, WAL bisa di-recycle dan replica perlu rebuild:
+
+```bash
+# Di replica
+sudo systemctl stop postgresql
+sudo rm -rf /var/lib/pgsql/data
+sudo PGPASSWORD='<password>' pg_basebackup \
+    -h <primary_ip> -U replicator -D /var/lib/pgsql/data \
+    -Fp -Xs -P -R -S node3_replica_slot
+sudo chown -R postgres:postgres /var/lib/pgsql/data
+sudo chmod 700 /var/lib/pgsql/data
+sudo systemctl start postgresql
+```
