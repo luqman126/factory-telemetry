@@ -162,6 +162,8 @@ source "$(dirname "$0")/.venv/bin/activate"
 
 spark-submit \
     --master "$SPARK_MASTER" \
+    --executor-memory 1g \
+    --driver-memory 512m \
     --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261 \
     "$(dirname "$0")/batch_analytics.py" \
     "$S3_URI" \
