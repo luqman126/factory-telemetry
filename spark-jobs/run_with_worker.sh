@@ -50,7 +50,7 @@ source "$ENV_PATH"
 # ============================================================
 REGION="ap-southeast-1"
 AMI_ID="ami-03256949a823ccf8b"
-INSTANCE_TYPE="c7i-flex.large"
+INSTANCE_TYPE="t3.small"
 SUBNET_ID="$WORKER_SUBNET_ID"
 SG_ID="$WORKER_SG_ID"
 SPARK_MASTER="$SPARK_MASTER_URL"
@@ -104,7 +104,7 @@ for i in $(seq 1 "$WORKER_COUNT"); do
         --metadata-options "HttpTokens=optional,HttpEndpoint=enabled" \
         --user-data "$USER_DATA" \
         --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$WORKER_NAME-$i}]" \
-        --block-device-mappings "DeviceName=/dev/xvda,Ebs={VolumeSize=50,VolumeType=gp3,DeleteOnTermination=true}" \
+        --block-device-mappings "DeviceName=/dev/xvda,Ebs={VolumeSize=20,VolumeType=gp3,DeleteOnTermination=true}" \
         --query 'Instances[0].InstanceId' \
         --output text)
     echo "  Worker $i — Instance ID: $INSTANCE_ID"
@@ -167,7 +167,7 @@ spark-submit \
     --conf spark.driver.host=10.0.1.127 \
     --conf spark.driver.bindAddress=10.0.1.127 \
     --conf spark.dynamicAllocation.enabled=false \
-    --executor-memory 2g \
+    --executor-memory 1g \
     --driver-memory 512m \
     --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261,org.postgresql:postgresql:42.7.4 \
     "$(dirname "$0")/batch_analytics.py" \
