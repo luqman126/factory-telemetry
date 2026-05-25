@@ -139,30 +139,35 @@ def run(parquet_path: str, worker_count: int = 0):
     parquet_path = parquet_path.replace("s3://", "s3a://", 1)
 
     # --------------------------------------------------------
-    # Baca Parquet
+    # Baca Parquet + smart repartition + cache
+    # df di-cache karena dipakai untuk multiple actions:
+    # count, agg time, groupBy, anomaly detection
+    # Tanpa cache, setiap action akan re-read dari S3 → SLOW
     # --------------------------------------------------------
     df = spark.read.parquet(parquet_path)
-    total_records = df.count()
+
+    # Smart repartition sebelum cache
+    if worker_count > 0:
+        num_partitions = max(worker_count * 2, 4)
+        df = df.repartition(num_partitions)
+        logger.info(f"Repartitioned to {num_partitions} partitions")
+
+    df = df.cache()
+    total_records = df.count()  # Trigger cache materialization
     logger.info(f"Records  : {total_records}")
 
     # --------------------------------------------------------
-    # Smart repartition — hanya kalau data cukup besar
-    # Threshold: > 50K records dan ada worker aktif
-    # Tanpa ini, 1 Parquet file = 1 partition = 1 task = worker idle
+    # Window waktu — gabung min+max dalam 1 agg call (1 action)
     # --------------------------------------------------------
-    if total_records > 50_000 and worker_count > 0:
-        num_partitions = worker_count * 2  # 2 tasks per core
-        df = df.repartition(num_partitions)
-        logger.info(f"Repartitioned to {num_partitions} partitions")
-    else:
-        logger.info(f"Skipping repartition (records={total_records}, workers={worker_count})")
-
-    # Window waktu dari data
-    window_start = df.agg(F.min("time")).collect()[0][0]
-    window_end   = df.agg(F.max("time")).collect()[0][0]
+    window_row = df.agg(
+        F.min("time").alias("ws"),
+        F.max("time").alias("we")
+    ).collect()[0]
+    window_start = window_row["ws"]
+    window_end   = window_row["we"]
 
     # --------------------------------------------------------
-    # Agregasi per device
+    # Agregasi per device (small output, aman collect)
     # --------------------------------------------------------
     agg_df = df.groupBy("device_id", "location").agg(
         F.avg("temperature").alias("avg_temperature"),
@@ -197,7 +202,6 @@ def run(parquet_path: str, worker_count: int = 0):
     # Anomali detection — distributed write via JDBC
     # Tidak collect ke driver — executor langsung write ke DB
     # --------------------------------------------------------
-    # Build anomaly DataFrame untuk semua sensor sekaligus (union)
     anomaly_dfs = []
     for sensor, thres in THRESHOLDS.items():
         anomaly_df = df.filter(
@@ -214,13 +218,14 @@ def run(parquet_path: str, worker_count: int = 0):
         )
         anomaly_dfs.append(anomaly_df)
 
-    # Union all sensor anomalies into single DataFrame
+    # Union all sensor anomalies
     anomaly_combined = anomaly_dfs[0]
     for adf in anomaly_dfs[1:]:
         anomaly_combined = anomaly_combined.unionByName(adf)
 
-    # Count tanpa collect (action lightweight)
-    anomaly_count = anomaly_combined.count()
+    # Coalesce ke jumlah partition kecil untuk JDBC write
+    # Terlalu banyak partition = terlalu banyak DB connection paralel
+    anomaly_combined = anomaly_combined.coalesce(2)
 
     # --------------------------------------------------------
     # Simpan ke DB
@@ -239,22 +244,21 @@ def run(parquet_path: str, worker_count: int = 0):
         save_analytics(engine, analytics_rows, job_id, window_start, window_end)
         logger.info(f"Analytics tersimpan: {len(analytics_rows)} metric")
 
-        if anomaly_count > 0:
-            # Delete existing anomalies in window (idempotent)
-            with engine.connect() as conn:
-                conn.execute(text("""
-                    DELETE FROM anomaly_events
-                    WHERE event_time >= :ws AND event_time <= :we
-                """), {"ws": window_start, "we": window_end})
-                conn.commit()
+        # Delete existing anomalies in window (idempotent re-run)
+        with engine.connect() as conn:
+            conn.execute(text("""
+                DELETE FROM anomaly_events
+                WHERE event_time >= :ws AND event_time <= :we
+            """), {"ws": window_start, "we": window_end})
+            conn.commit()
 
-            # Distributed write — executor langsung tulis ke DB
-            anomaly_combined.write \
-                .mode("append") \
-                .jdbc(url=jdbc_url, table="anomaly_events", properties=jdbc_props)
-            logger.info(f"Anomali tersimpan: {anomaly_count} event (distributed write)")
-        else:
-            logger.info("Tidak ada anomali terdeteksi")
+        # Distributed write — executor langsung tulis ke DB paralel
+        # Tidak ada count() dulu — write langsung, kalau kosong = no-op
+        anomaly_combined.write \
+            .mode("append") \
+            .option("batchsize", 5000) \
+            .jdbc(url=jdbc_url, table="anomaly_events", properties=jdbc_props)
+        logger.info("Anomali tersimpan via distributed JDBC write")
 
         finished_at        = datetime.now(timezone.utc)
         execution_time_sec = (finished_at - started_at).total_seconds()
