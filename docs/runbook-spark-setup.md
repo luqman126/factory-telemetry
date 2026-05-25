@@ -15,7 +15,7 @@ Sistem ini mengimplementasikan **batch processing pipeline** menggunakan Apache 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        DATA INGESTION (Real-time)                        │
+│                        DATA INGESTION (Real-time)                       │
 │                                                                         │
 │  IoT Simulator ──MQTT──► Mosquitto ──► FastAPI Consumer ──► TimescaleDB │
 │  (3 device)              (broker)       (batch insert)       (primary)  │
@@ -24,7 +24,7 @@ Sistem ini mengimplementasikan **batch processing pipeline** menggunakan Apache 
                                                         │ export (hourly/on-demand)
                                                         ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           DATA LAKE (S3)                                 │
+│                           DATA LAKE (S3)                                │
 │                                                                         │
 │  s3://iot-bigdata-datalake-kagebyo/                                     │
 │  ├── raw/              ← Parquet dari export_to_parquet.py              │
@@ -37,16 +37,16 @@ Sistem ini mengimplementasikan **batch processing pipeline** menggunakan Apache 
                                                         │ s3a:// read
                                                         ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                     BATCH PROCESSING (Apache Spark)                      │
+│                     BATCH PROCESSING (Apache Spark)                     │
 │                                                                         │
-│  ┌──────────────────┐     ┌──────────────────────────────────────┐     │
-│  │  Spark Master    │     │  Ephemeral Workers (0-N)             │     │
-│  │  (applayer-1)    │────►│  - Auto-launch via AWS CLI           │     │
-│  │                  │     │  - Auto-terminate setelah job selesai│     │
-│  │  Roles:          │     │  - t3.small (2 vCPU, 2GB RAM)       │     │
-│  │  - Scheduler     │     │  - Custom AMI (Java 21 + Spark 3.5) │     │
-│  │  - Driver host   │     │                                      │     │
-│  └──────────────────┘     └──────────────────────────────────────┘     │
+│  ┌──────────────────┐     ┌──────────────────────────────────────┐      │
+│  │  Spark Master    │     │  Ephemeral Workers (0-N)             │      │
+│  │  (applayer-1)    │────►│  - Auto-launch via AWS CLI           │      │
+│  │                  │     │  - Auto-terminate setelah job selesai│      │
+│  │  Roles:          │     │  - t3.small (2 vCPU, 2GB RAM)        │      │
+│  │  - Scheduler     │     │  - Custom AMI (Java 21 + Spark 3.5)  │      │
+│  │  - Driver host   │     │                                      │      │
+│  └──────────────────┘     └──────────────────────────────────────┘      │
 │                                                                         │
 │  Job: batch_analytics.py                                                │
 │  ├── Read Parquet dari S3 (distributed)                                 │
@@ -60,7 +60,7 @@ Sistem ini mengimplementasikan **batch processing pipeline** menggunakan Apache 
                                                         │ JDBC write
                                                         ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                      SERVING LAYER (PostgreSQL + Grafana)                │
+│                      SERVING LAYER (PostgreSQL + Grafana)               │
 │                                                                         │
 │  TimescaleDB (datalayer-1)                                              │
 │  ├── analytics_results   ← output agregasi per device                   │
@@ -90,16 +90,16 @@ Sistem ini mengimplementasikan **batch processing pipeline** menggunakan Apache 
 ```
                     ┌─────────────────────────────┐
                     │         DRIVER              │
-                    │    (applayer-1, 512MB)       │
+                    │    (applayer-1, 512MB)      │
                     │                             │
                     │  - Parse job                │
-                    │  - Build DAG               │
-                    │  - Schedule tasks          │
-                    │  - Collect small results   │
+                    │  - Build DAG                │
+                    │  - Schedule tasks           │
+                    │  - Collect small results    │
                     └──────────┬──────────────────┘
                                │ assign tasks
                     ┌──────────┴──────────────────┐
-                    │                              │
+                    │                             │
             ┌───────▼───────┐            ┌────────▼──────┐
             │  EXECUTOR 1   │            │  EXECUTOR 2   │
             │  (worker-1)   │            │  (worker-2)   │
