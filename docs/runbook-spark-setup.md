@@ -182,6 +182,33 @@ df.write.jdbc(...)  # distributed write, no collect
 - Pakai distributed JDBC write untuk output besar (anomaly events), bukan collect ke driver
 - Set `batchsize` di JDBC properties: `--option batchsize 5000`
 
+### Issue 7: `--master local[*]` di spark-submit tidak diterapkan
+
+**Gejala:** Pakai `--master local[*]` tapi job tetap connect ke standalone master.
+
+**Penyebab:** Kalau code memanggil `SparkSession.builder.master(...)` eksplisit, ini akan **override** `--master` dari spark-submit. Precedence order:
+
+```
+SparkSession.builder.master(...) di code   ← paling tinggi
+> spark-submit --master flag
+> spark-defaults.conf
+```
+
+**Solusi:** Hapus `.master()` call dari code. Biarkan spark-submit `--master` jadi satu-satunya tempat menentukan master URL:
+
+```python
+# BAD
+spark = SparkSession.builder \
+    .master(os.getenv("SPARK_MASTER_URL", "local[*]")) \
+    .getOrCreate()
+
+# GOOD — master ditentukan dari spark-submit
+spark = SparkSession.builder \
+    .appName(...) \
+    .config(...) \
+    .getOrCreate()
+```
+
 ---
 
 ## Benchmark Procedure

@@ -115,21 +115,20 @@ def run(parquet_path: str, worker_count: int = 0):
     logger.info(f"Workers  : {worker_count}")
 
     # --------------------------------------------------------
-    # Init Spark — configurable master + S3A config
+    # Init Spark — master URL ditentukan oleh spark-submit --master
+    # Kalau tidak di-set, default fallback ke local[*]
     # --------------------------------------------------------
-    spark_master = os.getenv("SPARK_MASTER_URL", "local[*]")
-    logger.info(f"Spark master: {spark_master}")
-
-    spark = SparkSession.builder \
+    spark_builder = SparkSession.builder \
         .appName(f"iot_analytics_{job_id}") \
-        .master(spark_master) \
         .config("spark.hadoop.fs.s3a.impl",
                 "org.apache.hadoop.fs.s3a.S3AFileSystem") \
         .config("spark.hadoop.fs.s3a.aws.credentials.provider",
                 "com.amazonaws.auth.InstanceProfileCredentialsProvider") \
         .config("spark.hadoop.fs.s3a.endpoint",
-                "s3.ap-southeast-1.amazonaws.com") \
-        .getOrCreate()
+                "s3.ap-southeast-1.amazonaws.com")
+
+    spark = spark_builder.getOrCreate()
+    logger.info(f"Spark master: {spark.sparkContext.master}")
 
     spark.sparkContext.setLogLevel("WARN")
 
