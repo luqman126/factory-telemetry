@@ -5,6 +5,164 @@
 
 ---
 
+## Arsitektur Big Data Pipeline
+
+### Overview
+
+Sistem ini mengimplementasikan **batch processing pipeline** menggunakan Apache Spark untuk menganalisis data sensor IoT yang terkumpul dari lingkungan manufaktur. Pipeline ini merupakan bagian dari arsitektur Lambda yang simplified — fokus pada batch layer.
+
+### Data Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        DATA INGESTION (Real-time)                        │
+│                                                                         │
+│  IoT Simulator ──MQTT──► Mosquitto ──► FastAPI Consumer ──► TimescaleDB │
+│  (3 device)              (broker)       (batch insert)       (primary)  │
+└─────────────────────────────────────────────────────────────────────────┘
+                                                        │
+                                                        │ export (hourly/on-demand)
+                                                        ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           DATA LAKE (S3)                                 │
+│                                                                         │
+│  s3://iot-bigdata-datalake-kagebyo/                                     │
+│  ├── raw/              ← Parquet dari export_to_parquet.py              │
+│  └── benchmark/        ← Parquet sintetis dari generate_bulk_data.py    │
+│                                                                         │
+│  Format: Apache Parquet (columnar, compressed)                          │
+│  Alasan: efisien untuk analytical query, native Spark support           │
+└─────────────────────────────────────────────────────────────────────────┘
+                                                        │
+                                                        │ s3a:// read
+                                                        ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     BATCH PROCESSING (Apache Spark)                      │
+│                                                                         │
+│  ┌──────────────────┐     ┌──────────────────────────────────────┐     │
+│  │  Spark Master    │     │  Ephemeral Workers (0-N)             │     │
+│  │  (applayer-1)    │────►│  - Auto-launch via AWS CLI           │     │
+│  │                  │     │  - Auto-terminate setelah job selesai│     │
+│  │  Roles:          │     │  - t3.small (2 vCPU, 2GB RAM)       │     │
+│  │  - Scheduler     │     │  - Custom AMI (Java 21 + Spark 3.5) │     │
+│  │  - Driver host   │     │                                      │     │
+│  └──────────────────┘     └──────────────────────────────────────┘     │
+│                                                                         │
+│  Job: batch_analytics.py                                                │
+│  ├── Read Parquet dari S3 (distributed)                                 │
+│  ├── Repartition (smart, berdasarkan worker count)                      │
+│  ├── Cache di memory (avoid re-read S3)                                 │
+│  ├── Agregasi per device (avg, min, max per sensor)                     │
+│  ├── Anomaly detection (threshold-based)                                │
+│  └── Write hasil ke DB (JDBC distributed)                               │
+└─────────────────────────────────────────────────────────────────────────┘
+                                                        │
+                                                        │ JDBC write
+                                                        ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      SERVING LAYER (PostgreSQL + Grafana)                │
+│                                                                         │
+│  TimescaleDB (datalayer-1)                                              │
+│  ├── analytics_results   ← output agregasi per device                   │
+│  ├── anomaly_events      ← threshold violations                         │
+│  └── spark_job_log       ← metadata setiap job run                      │
+│                                                                         │
+│  Grafana (applayer-1)                                                   │
+│  ├── Dashboard real-time sensor readings                                │
+│  ├── Dashboard analytics results                                        │
+│  └── Telegram alerting                                                  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Komponen Big Data
+
+| Komponen | Teknologi | Peran |
+|----------|-----------|-------|
+| Message Broker | Eclipse Mosquitto (MQTT) | Decouple producer-consumer, reliable delivery |
+| Time-Series DB | PostgreSQL + TimescaleDB | Penyimpanan optimized untuk data sensor time-series |
+| Data Lake | Amazon S3 (Parquet) | Storage murah, format columnar untuk analytics |
+| Batch Engine | Apache Spark 3.5.8 | Distributed processing, in-memory computation |
+| Orchestration | Bash + AWS CLI | Ephemeral worker lifecycle management |
+| Visualization | Grafana | Dashboard + alerting |
+
+### Distributed Computing Model
+
+```
+                    ┌─────────────────────────────┐
+                    │         DRIVER              │
+                    │    (applayer-1, 512MB)       │
+                    │                             │
+                    │  - Parse job                │
+                    │  - Build DAG               │
+                    │  - Schedule tasks          │
+                    │  - Collect small results   │
+                    └──────────┬──────────────────┘
+                               │ assign tasks
+                    ┌──────────┴──────────────────┐
+                    │                              │
+            ┌───────▼───────┐            ┌────────▼──────┐
+            │  EXECUTOR 1   │            │  EXECUTOR 2   │
+            │  (worker-1)   │            │  (worker-2)   │
+            │               │            │               │
+            │  - Read S3    │            │  - Read S3    │
+            │  - Transform  │            │  - Transform  │
+            │  - Write DB   │            │  - Write DB   │
+            └───────────────┘            └───────────────┘
+```
+
+**Key concepts yang diterapkan:**
+- **Lazy evaluation** — Spark membangun DAG (Directed Acyclic Graph) dari transformasi, baru execute saat action dipanggil
+- **In-memory caching** — `df.cache()` menyimpan data di RAM executor, menghindari re-read dari S3
+- **Data locality** — Spark mencoba schedule task di node yang sudah punya data
+- **Fault tolerance** — Task yang gagal otomatis di-retry di executor lain
+- **Partitioning** — Data dibagi ke N partition, setiap partition = 1 task = 1 unit parallelism
+
+### Spark Job DAG (batch_analytics.py)
+
+```
+Stage 0: Read Parquet dari S3
+    └── 1 task (1 file = 1 partition awal)
+
+Stage 1: Repartition (shuffle)
+    └── N tasks (N = worker_count × 2)
+    └── Trigger: repartition() — redistribute data ke N partition
+
+Stage 2: Cache materialization
+    └── N tasks (count() trigger cache)
+
+Stage 3: Aggregation (groupBy + agg)
+    └── N tasks → collect ke driver (output kecil: 160 rows)
+
+Stage 4: Anomaly detection + JDBC write
+    └── Filter per sensor → union → coalesce(2) → write.jdbc()
+    └── 2 tasks (2 parallel DB connections)
+```
+
+### Hasil Eksperimen & Analisis
+
+| Skenario | Workers | Avg Time | Insight |
+|----------|---------|----------|---------|
+| Local mode | 0 | 28.56s | Baseline — semua di 1 JVM, no network |
+| 1 worker | 1 | 42.47s | +50% overhead dari network + coordination |
+| 2 worker | 2 | 44.13s* | Tidak ada speedup vs 1 worker |
+
+*) 2 worker memiliki variance tinggi — beberapa run stuck > 5 menit.
+
+**Kesimpulan:**
+
+Pada skala dataset 1M records (64MB Parquet) dengan hardware constraint (t3.small, 2GB RAM):
+
+1. **Overhead > Benefit** — Network transfer, shuffle, coordination cost lebih besar dari compute saving.
+2. **Amdahl's Law** — Serial portion (S3 I/O, DB write, driver coordination) membatasi maximum speedup.
+3. **Threshold** — Distributed computing baru memberikan ROI positif pada:
+   - Dataset > 1GB (ratusan juta records)
+   - Worker dengan RAM > 8GB (r5.xlarge+)
+   - Job yang compute-intensive (ML training, complex joins)
+
+Ini adalah **temuan valid** yang konsisten dengan literatur distributed computing — bukan kegagalan sistem.
+
+---
+
 ## Setup Spark Master di applayer-1
 
 ### 1. Install Java 21
