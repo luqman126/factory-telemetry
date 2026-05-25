@@ -162,6 +162,9 @@ source "$(dirname "$0")/.venv/bin/activate"
 
 spark-submit \
     --master "$SPARK_MASTER" \
+    --conf spark.driver.host=10.0.1.127 \
+    --conf spark.driver.bindAddress=10.0.1.127 \
+    --conf spark.dynamicAllocation.enabled=false \
     --executor-memory 1g \
     --driver-memory 512m \
     --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261 \
