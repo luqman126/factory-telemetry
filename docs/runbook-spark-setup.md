@@ -209,6 +209,37 @@ spark = SparkSession.builder \
     .getOrCreate()
 ```
 
+### Issue 8: Worker stuck saat baca S3 (Stage 0 task 0/N forever)
+
+**Gejala:** Job submitted ke ephemeral worker, worker registered, tapi Stage 0 (read Parquet dari S3) tidak pernah selesai. Tidak ada error eksplisit.
+
+**Penyebab:** Amazon Linux 2023 default pakai **IMDSv2** (metadata service v2 yang require token). AWS SDK lama (`aws-java-sdk-bundle:1.12.261`) yang dipakai Hadoop S3A tidak fully compatible dengan IMDSv2 strict mode → gagal ambil IAM credentials → gagal akses S3.
+
+**Diagnosa:**
+```bash
+# Test akses metadata tanpa token (IMDSv1)
+ssh ec2-user@<worker_ip> "curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+# Empty response = IMDSv2 required
+
+# Test dengan token (IMDSv2)
+ssh ec2-user@<worker_ip> 'TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60") && curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/iam/security-credentials/'
+# Return role name = IAM OK, masalah di SDK compatibility
+```
+
+**Solusi:** Launch worker dengan IMDSv1 enabled:
+```bash
+aws ec2 run-instances \
+    ... \
+    --metadata-options "HttpTokens=optional,HttpEndpoint=enabled"
+```
+
+Atau update existing worker:
+```bash
+aws ec2 modify-instance-metadata-options \
+    --instance-id <worker_id> \
+    --http-tokens optional
+```
+
 ---
 
 ## Benchmark Procedure
