@@ -104,7 +104,7 @@ for i in $(seq 1 "$WORKER_COUNT"); do
         --metadata-options "HttpTokens=optional,HttpEndpoint=enabled" \
         --user-data "$USER_DATA" \
         --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$WORKER_NAME-$i}]" \
-        --block-device-mappings "DeviceName=/dev/xvda,Ebs={VolumeSize=0,VolumeType=gp3,DeleteOnTermination=true}" \
+        --block-device-mappings "DeviceName=/dev/xvda,Ebs={VolumeSize=50,VolumeType=gp3,DeleteOnTermination=true}" \
         --query 'Instances[0].InstanceId' \
         --output text)
     echo "  Worker $i — Instance ID: $INSTANCE_ID"
