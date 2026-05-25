@@ -167,7 +167,7 @@ spark-submit \
     --conf spark.driver.host=10.0.1.127 \
     --conf spark.driver.bindAddress=10.0.1.127 \
     --conf spark.dynamicAllocation.enabled=false \
-    --executor-memory 3g \
+    --executor-memory 2g \
     --driver-memory 512m \
     --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261,org.postgresql:postgresql:42.7.4 \
     "$(dirname "$0")/batch_analytics.py" \
