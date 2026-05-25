@@ -101,6 +101,7 @@ for i in $(seq 1 "$WORKER_COUNT"); do
         --instance-type "$INSTANCE_TYPE" \
         --subnet-id "$SUBNET_ID" \
         --security-group-ids "$SG_ID" \
+        --iam-instance-profile "Name=$WORKER_IAM_PROFILE" \
         --user-data "$USER_DATA" \
         --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$WORKER_NAME-$i}]" \
         --block-device-mappings "DeviceName=/dev/xvda,Ebs={VolumeSize=8,VolumeType=gp3,DeleteOnTermination=true}" \
