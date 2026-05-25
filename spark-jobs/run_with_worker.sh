@@ -104,7 +104,7 @@ for i in $(seq 1 "$WORKER_COUNT"); do
         --metadata-options "HttpTokens=optional,HttpEndpoint=enabled" \
         --user-data "$USER_DATA" \
         --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$WORKER_NAME-$i}]" \
-        --block-device-mappings "DeviceName=/dev/xvda,Ebs={VolumeSize=30,VolumeType=gp3,DeleteOnTermination=true}" \
+        --block-device-mappings "DeviceName=/dev/xvda,Ebs={VolumeSize=0,VolumeType=gp3,DeleteOnTermination=true}" \
         --query 'Instances[0].InstanceId' \
         --output text)
     echo "  Worker $i — Instance ID: $INSTANCE_ID"
@@ -144,6 +144,7 @@ echo "[3/5] Starting Spark workers..."
 for WORKER_IP in "${WORKER_IPS[@]}"; do
     ssh -i ~/.ssh/iot-worker-key \
         -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
         -o ConnectTimeout=30 \
         ec2-user@"$WORKER_IP" \
         "SPARK_LOCAL_IP=$WORKER_IP $SPARK_HOME/sbin/start-worker.sh $SPARK_MASTER"
