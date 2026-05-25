@@ -168,7 +168,7 @@ spark-submit \
     --conf spark.dynamicAllocation.enabled=false \
     --executor-memory 1g \
     --driver-memory 512m \
-    --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261 \
+    --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261,org.postgresql:postgresql:42.7.4 \
     "$(dirname "$0")/batch_analytics.py" \
     "$S3_URI" \
     "$WORKER_COUNT"

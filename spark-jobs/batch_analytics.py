@@ -194,38 +194,65 @@ def run(parquet_path: str, worker_count: int = 0):
             })
 
     # --------------------------------------------------------
-    # Anomali detection — threshold sederhana
+    # Anomali detection — distributed write via JDBC
+    # Tidak collect ke driver — executor langsung write ke DB
     # --------------------------------------------------------
-    anomaly_rows = []
+    # Build anomaly DataFrame untuk semua sensor sekaligus (union)
+    anomaly_dfs = []
     for sensor, thres in THRESHOLDS.items():
-        anomalies = df.filter(
+        anomaly_df = df.filter(
             F.col(sensor).isNotNull() & (F.col(sensor) > thres["warning"])
-        ).select("time", "device_id", "location", sensor).collect()
+        ).select(
+            F.col("time").alias("event_time"),
+            F.col("device_id"),
+            F.col("location"),
+            F.lit(sensor).alias("sensor_type"),
+            F.col(sensor).cast("double").alias("observed_value"),
+            F.lit(thres["warning"]).alias("threshold_value"),
+            F.when(F.col(sensor) > thres["critical"], "CRITICAL")
+             .otherwise("MEDIUM").alias("severity"),
+        )
+        anomaly_dfs.append(anomaly_df)
 
-        for row in anomalies:
-            val = row[sensor]
-            severity = "CRITICAL" if val > thres["critical"] else "MEDIUM"
-            anomaly_rows.append({
-                "event_time":      row["time"],
-                "device_id":       row["device_id"],
-                "location":        row["location"],
-                "sensor_type":     sensor,
-                "observed_value":  float(val),
-                "threshold_value": thres["warning"],
-                "severity":        severity,
-            })
+    # Union all sensor anomalies into single DataFrame
+    anomaly_combined = anomaly_dfs[0]
+    for adf in anomaly_dfs[1:]:
+        anomaly_combined = anomaly_combined.unionByName(adf)
+
+    # Count tanpa collect (action lightweight)
+    anomaly_count = anomaly_combined.count()
 
     # --------------------------------------------------------
     # Simpan ke DB
     # --------------------------------------------------------
     engine = get_engine()
+
+    # JDBC connection params untuk distributed write
+    jdbc_url = f"jdbc:postgresql://{os.getenv('POSTGRES_HOST')}:{os.getenv('POSTGRES_PORT', '5432')}/{os.getenv('POSTGRES_DB')}"
+    jdbc_props = {
+        "user": os.getenv("POSTGRES_USER"),
+        "password": os.getenv("POSTGRES_PASSWORD"),
+        "driver": "org.postgresql.Driver",
+    }
+
     try:
         save_analytics(engine, analytics_rows, job_id, window_start, window_end)
         logger.info(f"Analytics tersimpan: {len(analytics_rows)} metric")
 
-        if anomaly_rows:
-            save_anomalies(engine, anomaly_rows, window_start, window_end)
-            logger.info(f"Anomali tersimpan: {len(anomaly_rows)} event")
+        if anomaly_count > 0:
+            # Delete existing anomalies in window (idempotent)
+            with engine.connect() as conn:
+                conn.execute(text("""
+                    DELETE FROM anomaly_events
+                    WHERE event_time >= :ws AND event_time <= :we
+                """), {"ws": window_start, "we": window_end})
+                conn.commit()
+
+            # Distributed write — executor langsung tulis ke DB
+            anomaly_combined.write \
+                .mode("append") \
+                .jdbc(url=jdbc_url, table="anomaly_events", properties=jdbc_props)
+            logger.info(f"Anomali tersimpan: {anomaly_count} event (distributed write)")
         else:
             logger.info("Tidak ada anomali terdeteksi")
 
@@ -250,7 +277,6 @@ def run(parquet_path: str, worker_count: int = 0):
     finally:
         engine.dispose()
         spark.stop()
-
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
