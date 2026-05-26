@@ -159,6 +159,31 @@ Penyebab fundamental:
 
 Hasil ini konsisten dengan **Amdahl's Law** — pada serial portion yang signifikan (driver coordination, DB write, S3 I/O), maximum speedup terbatas terlepas dari jumlah worker. Distributed computing baru memberikan ROI positif pada dataset skala GB-TB dan worker dengan resource lebih besar (r5.xlarge+).
 
+### Eksperimen dengan Data Real (simulator)
+
+Benchmark menggunakan data aktual dari simulator IoT yang berjalan di production (bukan synthetic). Data di-export dari TimescaleDB → Parquet → S3, lalu dianalisis oleh Spark.
+
+**Dataset:** 5.388 records, 3 device, window 1 jam (data terbaru hasil ingestion real-time)
+
+| Skenario        | Workers | Samples | Min      | Avg       | Max       |
+|-----------------|---------|---------|----------|-----------|-----------|
+| Local mode      | 0       | 3       | 13.65 s  | 13.90 s   | 14.10 s   |
+| 1 worker        | 1       | 1       | 22.15 s  | 22.15 s   | 22.15 s   |
+| 2 worker        | 2       | 3       | 21.09 s  | 22.99 s   | 25.11 s   |
+| 3 worker        | 3       | 4       | 22.36 s  | 25.07 s   | 27.58 s   |
+| 4 worker        | 4       | 3       | 21.92 s  | 24.32 s   | 25.74 s   |
+| 5 worker        | 5       | 2       | 21.67 s  | 22.19 s   | 22.72 s   |
+
+**Temuan:**
+
+- Local mode konsisten paling cepat (~14s) — semua compute terjadi in-process tanpa network.
+- Semua skenario distributed (1-5 worker) menunjukkan **overhead konstan ~8-11 detik** dibanding local.
+- Penambahan worker dari 1 ke 5 **tidak memberikan speedup** — waktu tetap ~22-25s.
+- Overhead tersebut berasal dari: executor launch, jar distribution, network roundtrip, JDBC connection setup.
+- Compute actual (groupBy + anomaly detection) untuk 5K records < 1 detik — terlalu kecil untuk di-paralelkan.
+
+Semua run berhasil tanpa error — menunjukkan bahwa **arsitektur distributed sudah stabil**, hanya belum memberikan performance benefit pada skala ini.
+
 ### Eksperimen Sebelumnya (arsitektur lama)
 
 Pada arsitektur sebelumnya (DB primary di app node), benchmark dengan 36.057 records menunjukkan diminishing returns dengan speedup terbatas (1.06x - 1.21x). Lihat git history untuk detail.
