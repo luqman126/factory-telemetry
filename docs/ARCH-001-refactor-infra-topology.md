@@ -71,18 +71,18 @@ iot-bigdata-worker-x — Ephemeral (t3.small)
 
 ## Connection Management
 
-Semua service yang connect ke database menggunakan **satu file**: `infra/.env` di Node 1.
+Semua service yang connect ke database menggunakan **satu file**: `infra/.env` di applayer-1.
 
 | Service | Mechanism | Variable |
 |---------|-----------|----------|
-| FastAPI Backend | Docker Compose env injection | `DB_HOST`, `DB_PORT` |
-| Grafana | Docker Compose env injection → datasource provisioning (`${DB_HOST}`) | `DB_HOST`, `DB_PORT` |
-| Spark Jobs | Source `infra/.env` sebelum `spark-submit` | `DB_HOST`, `DB_PORT` |
+| FastAPI Backend | Source `infra/.env` saat startup | `POSTGRES_HOST`, `POSTGRES_PORT` |
+| Grafana | Docker Compose env injection → datasource provisioning (`${POSTGRES_HOST}`) | `POSTGRES_HOST`, `POSTGRES_PORT` |
+| Spark Jobs | Source `infra/.env` sebelum `spark-submit` | `POSTGRES_HOST`, `POSTGRES_PORT` |
 
 ### Failover connection update procedure:
 
-1. Update `DB_HOST` di `infra/.env` → arahkan ke Node 3 (primary baru).
-2. Restart services: `docker compose restart backend grafana`.
+1. Update `POSTGRES_HOST` di `infra/.env` → arahkan ke datalayer-2 (primary baru).
+2. Restart services: `docker compose restart grafana && pkill -HUP uvicorn` (atau restart backend).
 3. Spark job otomatis pakai value baru pada submit berikutnya.
 
 > Satu file, satu update. Tidak ada hardcoded IP di application code maupun config file lain.
@@ -108,7 +108,7 @@ max_replication_slots = 3
 ### Key PostgreSQL settings (Replica):
 
 ```
-primary_conninfo = 'host=<node2-ip> port=5432 user=replicator'
+primary_conninfo = 'host=<datalayer-1-ip> port=5432 user=replicator'
 primary_slot_name = 'node3_replica_slot'
 ```
 
@@ -145,40 +145,41 @@ iot-bigdata-datalayer-2 → REPLICA (read-only, streaming replication)
 
 ### Phase 0 — Backup & Preservation
 
-- [ ] Create AMI for current Node 1 (app + DB).
-- [ ] Snapshot PostgreSQL EBS volume.
-- [ ] Backup semua `.env` dan compose files.
+- [x] Create AMI for current app node.
+- [x] Snapshot PostgreSQL EBS volume.
+- [x] Backup configuration and compose files.
 
-### Phase 1 — Provision Database Nodes
+### Phase 1 — Provision New Infrastructure
 
-- [ ] Launch Node 2 (DB Primary) — t3.small.
-- [ ] Launch Node 3 (DB Replica) — t3.small (same spec as Node 2).
-- [ ] Install PostgreSQL 16 + TimescaleDB di kedua node.
-- [ ] Configure replication slot di primary.
-- [ ] Setup streaming replication Node 2 → Node 3.
-- [ ] Validate replication: cek `pg_stat_replication`, test write propagation.
+- [x] Launch applayer-1 (fresh c7i-flex.large).
+- [x] Launch datalayer-1 (DB Primary) — t3.small.
+- [x] Launch datalayer-2 (DB Replica) — t3.small (same spec as datalayer-1).
+- [x] Install PostgreSQL 16 + TimescaleDB di kedua DB node.
+- [x] Configure replication slot di primary.
+- [x] Setup streaming replication datalayer-1 → datalayer-2.
+- [x] Validate replication: cek `pg_stat_replication`, test write propagation.
 
-### Phase 2 — Migrate PostgreSQL Primary
+### Phase 2 — Setup App Layer
 
-- [ ] Export data dari Node 1 PostgreSQL.
-- [ ] Import ke Node 2 PostgreSQL.
-- [ ] Update connection config di Node 1 `.env`.
-- [ ] Remove PostgreSQL container dari Node 1 compose.
-- [ ] Validate: backend bisa read/write ke Node 2.
+- [x] Install Docker, Python, Java, Spark di applayer-1.
+- [x] Setup `.env` dengan `POSTGRES_HOST` ke datalayer-1.
+- [x] Run docker compose (Mosquitto + Grafana).
+- [x] Start backend FastAPI + simulator.
+- [x] Validate: data masuk ke datalayer-1, replicated ke datalayer-2.
 
-### Phase 3 — Relocate Spark Master
+### Phase 3 — Setup Spark Master di applayer-1
 
-- [ ] Install Spark Master di Node 1.
-- [ ] Remove Spark Master dari Node 2.
-- [ ] Update Spark job DB write target ke Node 2.
-- [ ] Validate: `run_with_worker.sh` berjalan normal dengan ephemeral workers.
+- [x] Install Spark di applayer-1.
+- [x] Start Spark Master.
+- [x] Configure ephemeral worker pipeline (`run_with_worker.sh`).
+- [x] Validate: Spark job berjalan normal dengan ephemeral workers.
 
-### Phase 4 — Failover Simulation
+### Phase 4 — Failover Simulation (Backlog)
 
-- [ ] Simulate: stop PostgreSQL di Node 2.
-- [ ] Execute failover SOP (promote Node 3).
+- [ ] Simulate: stop PostgreSQL di datalayer-1.
+- [ ] Execute failover SOP (promote datalayer-2).
 - [ ] Verify semua services reconnect ke primary baru.
-- [ ] Rebuild Node 2 sebagai replica dari Node 3.
+- [ ] Rebuild datalayer-1 sebagai replica dari datalayer-2.
 - [ ] Verify replication kembali normal.
 
 ---
@@ -220,8 +221,8 @@ iot-bigdata-datalayer-2 → REPLICA (read-only, streaming replication)
 
 Jika migrasi gagal di phase manapun:
 
-1. Restore Node 1 dari AMI backup.
-2. Terminate Node 2 dan Node 3.
+1. Restore node lama dari AMI backup.
+2. Terminate node baru (applayer-1, datalayer-1, datalayer-2).
 3. Kembali ke arsitektur semula.
 
 ---
@@ -230,18 +231,19 @@ Jika migrasi gagal di phase manapun:
 
 | File | Purpose |
 |------|---------|
-| `infra/scripts/provision-db-primary.sh` | Setup Node 2: PostgreSQL 16 + TimescaleDB + replication config |
-| `infra/scripts/provision-db-replica.sh` | Setup Node 3: pg_basebackup + streaming replication |
-| `infra/scripts/migrate-data.sh` | Export data dari old container → import ke Node 2 |
-| `infra/docker-compose.yml` | Removed timescaledb service, Grafana uses DB_HOST env |
-| `infra/.env.example` | Added DB_HOST, DB_PORT as single source of truth |
-| `grafana/provisioning/datasources/timescaledb.yml` | URL changed to `${DB_HOST}:${DB_PORT}` |
+| `infra/scripts/provision-db-primary.sh` | Setup datalayer-1: PostgreSQL 16 + TimescaleDB + replication config |
+| `infra/scripts/provision-db-replica.sh` | Setup datalayer-2: pg_basebackup + streaming replication |
+| `infra/docker-compose.yml` | Mosquitto + Grafana saja (timescaledb removed) |
+| `infra/.env.example` | `POSTGRES_HOST` sebagai single source of truth |
+| `grafana/provisioning/datasources/timescaledb.yml` | URL pakai `${POSTGRES_HOST}:${POSTGRES_PORT}` |
+| `docs/runbook-db-setup.md` | Step-by-step + troubleshooting DB |
+| `docs/runbook-spark-setup.md` | Step-by-step + arsitektur big data + troubleshooting Spark |
 
 ### Execution Order
 
 ```
 1. SSH datalayer-1  → sudo ./provision-db-primary.sh <db> <user> <pass> <datalayer-2_ip>
 2. SSH datalayer-2  → sudo ./provision-db-replica.sh <datalayer-1_ip> <pass>
-3. SSH applayer-1   → Update .env (POSTGRES_HOST=<datalayer-1_ip>), docker compose up -d
+3. SSH applayer-1   → Setup .env (POSTGRES_HOST=<datalayer-1_ip>), docker compose up -d
 4. Validate         → Grafana connects, backend writes, replication active
 ```

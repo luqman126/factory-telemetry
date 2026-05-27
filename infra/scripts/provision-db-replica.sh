@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # ============================================================
 # provision-db-replica.sh
-# Provisioning script for Node 3 — DB Replica
+# Provisioning script for datalayer-2 — DB Replica
 # OS: Amazon Linux 2023
 # Installs: PostgreSQL 16 + TimescaleDB
-# Configures: streaming replication from Node 2 (primary)
+# Configures: streaming replication from datalayer-1 (primary)
 #
-# Usage: ssh ke Node 3, lalu:
+# Usage: ssh ke datalayer-2, lalu:
 #   chmod +x provision-db-replica.sh
 #   sudo ./provision-db-replica.sh <primary_ip> <db_password>
 #
-# Prerequisites: Node 2 (primary) sudah running dan replication slot sudah dibuat.
+# Prerequisites: datalayer-1 (primary) sudah running dan replication slot sudah dibuat.
 # ============================================================
 set -euo pipefail
 
@@ -78,5 +78,5 @@ echo "Replica is running. Verify with:"
 echo "  sudo -u postgres psql -c 'SELECT pg_is_in_recovery();'"
 echo "  -- Should return 't'"
 echo ""
-echo "On primary (Node 2), verify with:"
+echo "On primary (datalayer-1), verify with:"
 echo "  sudo -u postgres psql -c 'SELECT client_addr, state FROM pg_stat_replication;'"

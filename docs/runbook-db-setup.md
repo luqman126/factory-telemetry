@@ -18,7 +18,7 @@
 
 ---
 
-## Node 2 — DB Primary (iot-bigdata-datalayer-1)
+## datalayer-1 — DB Primary
 
 ### Prerequisites
 - Amazon Linux 2023 (EC2 t3.small)
@@ -83,7 +83,7 @@ sudo bash -c 'cat >> /var/lib/pgsql/data/pg_hba.conf <<EOF
 # App node + services (subnet)
 host    all             <db_user>        10.0.1.0/24       scram-sha-256
 
-# Replication from Node 3
+# Replication from datalayer-2
 host    replication     replicator       <node3_ip>/32     scram-sha-256
 EOF'
 ```
@@ -139,12 +139,12 @@ sudo -u postgres psql -c "SHOW wal_level;"
 
 ---
 
-## Node 3 — DB Replica (iot-bigdata-datalayer-2)
+## datalayer-2 — DB Replica
 
 ### Prerequisites
-- Amazon Linux 2023 (EC2 t3.small, same spec as Node 2)
+- Amazon Linux 2023 (EC2 t3.small, same spec as datalayer-1)
 - Security Group: inbound TCP 5432 dari `10.0.1.0/24`
-- Node 2 (primary) sudah running dan replication slot sudah dibuat
+- datalayer-1 (primary) sudah running dan replication slot sudah dibuat
 
 ### Step 1: Install PostgreSQL 16
 
@@ -217,10 +217,10 @@ sudo systemctl start postgresql
 ### Verifikasi Replica
 
 ```bash
-# Di Node 3 — harus return 't'
+# Di datalayer-2 — harus return 't'
 sudo -u postgres psql -c "SELECT pg_is_in_recovery();"
 
-# Di Node 2 — harus ada 1 row, state = 'streaming'
+# Di datalayer-1 — harus ada 1 row, state = 'streaming'
 sudo -u postgres psql -c "SELECT client_addr, state, sent_lsn, replay_lsn FROM pg_stat_replication;"
 ```
 
@@ -229,13 +229,13 @@ sudo -u postgres psql -c "SELECT client_addr, state, sent_lsn, replay_lsn FROM p
 ## Test Replication End-to-End
 
 ```bash
-# Di Node 2 (primary) — insert test data
+# Di datalayer-1 (primary) — insert test data
 sudo -u postgres psql -d <db_name> -c "
 INSERT INTO devices (device_id, device_name, location)
 VALUES ('test_repl', 'Replication Test', 'test_area');
 "
 
-# Di Node 3 (replica) — harus muncul
+# Di datalayer-2 (replica) — harus muncul
 sudo -u postgres psql -d <db_name> -c "
 SELECT * FROM devices WHERE device_id = 'test_repl';
 "
@@ -249,11 +249,11 @@ sudo -u postgres psql -d <db_name> -c "DELETE FROM devices WHERE device_id = 'te
 ## Topology Summary
 
 ```
-iot-bigdata-applayer-1 (Node 1 — App Layer)
+iot-bigdata-applayer-1 (App Layer)
     │
     │  TCP 5432
     ▼
-iot-bigdata-datalayer-1 (Node 2 — DB Primary) ─── streaming replication ───► iot-bigdata-datalayer-2 (Node 3 — DB Replica)
+iot-bigdata-datalayer-1 (DB Primary) ─── streaming replication ───► iot-bigdata-datalayer-2 (DB Replica)
     10.0.1.247                                                                  10.0.1.78
 ```
 

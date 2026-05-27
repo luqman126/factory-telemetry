@@ -292,7 +292,10 @@ python export_to_parquet.py
 
 # Spark job local mode (tanpa worker)
 spark-submit \
-  --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261 \
+  --master "local[*]" \
+  --executor-memory 512m \
+  --driver-memory 512m \
+  --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261,org.postgresql:postgresql:42.7.4 \
   batch_analytics.py s3://iot-bigdata-datalake-kagebyo/raw/<file>.parquet 0
 
 # Spark job dengan ephemeral worker (otomatis launch + terminate)

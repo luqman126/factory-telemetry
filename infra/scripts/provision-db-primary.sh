@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================
 # provision-db-primary.sh
-# Provisioning script for Node 2 — DB Primary
+# Provisioning script for datalayer-1 — DB Primary
 # OS: Amazon Linux 2023
 # Installs: PostgreSQL 16 + TimescaleDB
 # Configures: primary role with replication support
 #
-# Usage: ssh ke Node 2, lalu:
+# Usage: ssh ke datalayer-1, lalu:
 #   chmod +x provision-db-primary.sh
 #   sudo ./provision-db-primary.sh <db_name> <db_user> <db_password> <replica_ip>
 # ============================================================
@@ -70,10 +70,10 @@ EOF
 
 cat >> "$PGDATA/pg_hba.conf" <<EOF
 
-# App node (Node 1) — password auth
+# App node (applayer-1) — password auth
 host    all             ${DB_USER}       10.0.1.0/24       scram-sha-256
 
-# Replication from replica (Node 3)
+# Replication from replica (datalayer-2)
 host    replication     replicator       ${REPLICA_IP}/32   scram-sha-256
 EOF
 
@@ -111,4 +111,4 @@ fi
 
 echo ""
 echo "=== DONE ==="
-echo "Primary is running. Next: run provision-db-replica.sh on Node 3."
+echo "Primary is running. Next: run provision-db-replica.sh on datalayer-2."
