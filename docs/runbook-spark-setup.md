@@ -274,15 +274,22 @@ Worker SG → datalayer SG (`<datalayer_sg>`):
 
 ---
 
-## Known Issues & Lessons Learned
+## Troubleshooting & Common Issues
 
-### Issue 1: Worker fail dengan `createDirectory permission denied`
+Issues digrupkan berdasarkan kategori. Untuk diagnostic commands, lihat [Diagnostic Commands](#diagnostic-commands) di bawah.
+
+### Spark Master & Driver Issues
+
+#### Worker fail dengan `createDirectory permission denied`
 
 **Penyebab:** `/opt/spark` owned by root setelah install via sudo, tapi worker jalan sebagai ec2-user.
 
-**Solusi:** `chown ec2-user:ec2-user /opt/spark/logs /opt/spark/work`
+**Solusi:**
+```bash
+sudo chown -R ec2-user:ec2-user /opt/spark/logs /opt/spark/work
+```
 
-### Issue 2: `Initial job has not accepted any resources`
+#### `Initial job has not accepted any resources`
 
 Tiga kemungkinan penyebab — diagnose via Master Web UI (port 8080):
 
@@ -292,30 +299,149 @@ Tiga kemungkinan penyebab — diagnose via Master Web UI (port 8080):
 | `requires more resource` | Executor memory > worker memory | Set `--executor-memory 1g` |
 | Worker registered tapi job stuck | SG block worker → driver | Allow all TCP dari worker SG ke applayer SG |
 
-### Issue 3: Driver bind ke Tailscale IP, bukan VPC IP
+#### Driver bind ke Tailscale IP, bukan VPC IP
 
-**Penyebab:** Applayer-1 punya multiple IP (VPC `10.0.1.x`, Tailscale `100.x.x.x`, Docker bridges).
-Spark default pick salah satu yang tidak reachable dari worker.
+**Penyebab:** Applayer-1 punya multiple IP (VPC `10.0.1.x`, Tailscale `100.x.x.x`, Docker bridges). Spark default pick salah satu yang tidak reachable dari worker.
 
 **Solusi:** Explicit pin di spark-submit:
 ```bash
---conf spark.driver.host=10.0.1.127
---conf spark.driver.bindAddress=10.0.1.127
+--conf spark.driver.host=<vpc_ip>
+--conf spark.driver.bindAddress=<vpc_ip>
 ```
 
-### Issue 4: `iam:PassRole` denied saat launch worker
+`run_with_worker.sh` sudah auto-detect VPC IP `10.0.1.x` dari interface.
+
+#### `--master local[*]` di spark-submit tidak diterapkan
+
+**Gejala:** Pakai `--master local[*]` tapi job tetap connect ke standalone master.
+
+**Penyebab:** `SparkSession.builder.master(...)` di code akan **override** `--master` dari spark-submit. Precedence:
+
+```
+SparkSession.builder.master(...)  ← paling tinggi
+> spark-submit --master flag
+> spark-defaults.conf
+```
+
+**Solusi:** Hapus `.master()` call dari code:
+
+```python
+# BAD
+spark = SparkSession.builder.master("local[*]").getOrCreate()
+
+# GOOD — biarkan spark-submit yang menentukan
+spark = SparkSession.builder.appName(...).config(...).getOrCreate()
+```
+
+### Network & Security Group Issues
+
+#### Worker tidak bisa akses S3 (stuck di Stage 0 read)
+
+**Gejala:** Job submitted, worker registered, tapi Stage 0 (parquet read) tidak progress. CPU executor idle (~2%), `tasks 0/1`, `bytes read 0`.
+
+**Diagnosa:**
+```bash
+ssh ec2-user@<worker_ip> "aws s3 ls s3://<bucket>/ --region ap-southeast-1"
+# Stuck/timeout → worker tidak bisa reach S3 endpoint
+```
+
+**Penyebab:** Worker subnet tidak auto-assign public IP, dan tidak ada NAT Gateway/VPC Endpoint untuk S3.
+
+**Solusi (pilih salah satu):**
+
+1. Enable subnet auto-assign public IP:
+   ```bash
+   aws ec2 modify-subnet-attribute --subnet-id <subnet_id> --map-public-ip-on-launch
+   ```
+2. Launch worker dengan `--network-interfaces "AssociatePublicIpAddress=true,..."` (sudah dipakai di `run_with_worker.sh`).
+3. Buat VPC Endpoint untuk S3 (gateway endpoint, gratis, tidak butuh public IP).
+
+#### Worker stuck karena IMDSv2 incompatibility
+
+**Gejala:** Worker registered, executor running, tapi gagal ambil IAM credentials → tidak bisa akses S3.
+
+**Penyebab:** Amazon Linux 2023 default pakai IMDSv2 yang require token. AWS SDK lama (`aws-java-sdk-bundle:1.12.261`) yang dipakai Hadoop S3A tidak fully compatible dengan IMDSv2 strict mode.
+
+**Diagnosa:**
+```bash
+# Test IMDSv1 (no token)
+ssh ec2-user@<worker_ip> "curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+# Empty = IMDSv2 required
+
+# Test IMDSv2 (with token)
+ssh ec2-user@<worker_ip> 'TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60") && curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/iam/security-credentials/'
+# Return role name = IAM OK, masalah di SDK compat
+```
+
+**Solusi:** Launch worker dengan IMDSv1 enabled:
+```bash
+aws ec2 run-instances ... --metadata-options "HttpTokens=optional,HttpEndpoint=enabled"
+```
+
+Sudah dipakai di `run_with_worker.sh`.
+
+#### SSH host key conflict saat IP worker recycled
+
+**Gejala:**
+```
+WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!
+Host key verification failed.
+```
+
+**Penyebab:** AWS recycle private IP — worker baru punya IP yang sama dengan worker lama tapi host key berbeda.
+
+**Solusi:** Pakai `-o UserKnownHostsFile=/dev/null` di SSH command (sudah dipakai di `run_with_worker.sh`):
+```bash
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ec2-user@<worker_ip>
+```
+
+Atau hapus entry lama: `ssh-keygen -R <worker_ip>`.
+
+### IAM & Permissions Issues
+
+#### `iam:PassRole` denied saat launch worker
 
 **Penyebab:** IAM Role applayer-1 tidak punya permission untuk attach IAM Role ke EC2 lain.
 
-**Solusi:** Tambahkan inline policy `AllowPassRoleAndEC2` (lihat di atas).
+**Solusi:** Tambahkan inline policy `AllowPassRoleAndEC2` (lihat di [IAM Roles](#iam-instance-profile)).
 
-### Issue 5: Worker tidak punya akses S3 saat baca Parquet
+#### Worker tidak punya akses S3 saat baca Parquet
 
 **Penyebab:** Ephemeral worker EC2 di-launch tanpa IAM Profile.
 
-**Solusi:** Pass IAM profile ke worker via `--iam-instance-profile Name=<profile_name>`.
+**Solusi:** Pass IAM profile via `--iam-instance-profile Name=<profile_name>` (sudah dipakai di `run_with_worker.sh`).
 
-### Issue 6: Job sangat lambat (>30 menit untuk 1M records)
+### Resource & Performance Issues
+
+#### Disk space habis di worker (`No space left on device`)
+
+**Gejala:**
+```
+ERROR TaskSchedulerImpl: Lost executor X: Unable to create executor due to No space left on device
+```
+
+**Penyebab:** EBS volume worker terlalu kecil. Spark butuh disk untuk Maven jars (~250MB), shuffle intermediate, cache spill, logs.
+
+**Solusi:** Naikkan `VolumeSize` di `aws ec2 run-instances`. Untuk dataset 1M records minimum 30GB. Untuk > 5M records, 50GB+.
+
+#### Heartbeat timeout / Worker lost
+
+**Gejala:**
+```
+ERROR TaskSchedulerImpl: Lost executor X: Executor heartbeat timed out
+```
+
+**Penyebab:** Executor JVM stop-the-world GC pause panjang karena memory pressure. Common di t3.small + dataset besar.
+
+**Solusi:**
+- Naikkan worker instance type (t3.medium 4GB, atau lebih)
+- Naikkan `--executor-memory` proportional dengan instance memory
+- Jangan pakai `df.cache()` untuk dataset yang melebihi heap (let it spill alami)
+- Tune G1GC: `--conf spark.executor.extraJavaOptions="-XX:+UseG1GC"`
+
+> **Trade-off:** Free-tier hardware ada limit. Untuk benchmark dataset 10M+ records, perlu r5.xlarge atau lebih.
+
+#### Job sangat lambat (>30 menit untuk 1M records)
 
 **Penyebab utama:** Multiple actions tanpa cache → Spark re-read S3 berkali-kali untuk setiap action.
 
@@ -325,173 +451,23 @@ df.count()
 df.agg(F.min("time"))
 df.agg(F.max("time"))
 df.groupBy(...).collect()
-df.filter(...).collect()  # 4× untuk 4 sensor
 
 # GOOD
 df = spark.read.parquet(path).repartition(N).cache()
 df.count()  # materialize cache
 df.agg(F.min("time"), F.max("time"))  # combined
-df.write.jdbc(...)  # distributed write, no collect
+df.write.jdbc(...)  # distributed write
 ```
 
 **Solusi tambahan:**
 - `df.cache()` setelah read + repartition
 - Combine multiple `agg()` calls jadi 1
-- Pakai distributed JDBC write untuk output besar (anomaly events), bukan collect ke driver
-- Set `batchsize` di JDBC properties: `--option batchsize 5000`
+- Distributed JDBC write untuk output besar (anomaly events), bukan collect ke driver
+- Set `batchsize` di JDBC properties: 5000
 
-### Issue 7: `--master local[*]` di spark-submit tidak diterapkan
+### Diagnostic Commands
 
-**Gejala:** Pakai `--master local[*]` tapi job tetap connect ke standalone master.
-
-**Penyebab:** Kalau code memanggil `SparkSession.builder.master(...)` eksplisit, ini akan **override** `--master` dari spark-submit. Precedence order:
-
-```
-SparkSession.builder.master(...) di code   ← paling tinggi
-> spark-submit --master flag
-> spark-defaults.conf
-```
-
-**Solusi:** Hapus `.master()` call dari code. Biarkan spark-submit `--master` jadi satu-satunya tempat menentukan master URL:
-
-```python
-# BAD
-spark = SparkSession.builder \
-    .master(os.getenv("SPARK_MASTER_URL", "local[*]")) \
-    .getOrCreate()
-
-# GOOD — master ditentukan dari spark-submit
-spark = SparkSession.builder \
-    .appName(...) \
-    .config(...) \
-    .getOrCreate()
-```
-
-### Issue 8: Worker stuck saat baca S3 (Stage 0 task 0/N forever)
-
-**Gejala:** Job submitted ke ephemeral worker, worker registered, tapi Stage 0 (read Parquet dari S3) tidak pernah selesai. Tidak ada error eksplisit.
-
-**Penyebab:** Amazon Linux 2023 default pakai **IMDSv2** (metadata service v2 yang require token). AWS SDK lama (`aws-java-sdk-bundle:1.12.261`) yang dipakai Hadoop S3A tidak fully compatible dengan IMDSv2 strict mode → gagal ambil IAM credentials → gagal akses S3.
-
-**Diagnosa:**
-```bash
-# Test akses metadata tanpa token (IMDSv1)
-ssh ec2-user@<worker_ip> "curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/"
-# Empty response = IMDSv2 required
-
-# Test dengan token (IMDSv2)
-ssh ec2-user@<worker_ip> 'TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60") && curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/iam/security-credentials/'
-# Return role name = IAM OK, masalah di SDK compatibility
-```
-
-**Solusi:** Launch worker dengan IMDSv1 enabled:
-```bash
-aws ec2 run-instances \
-    ... \
-    --metadata-options "HttpTokens=optional,HttpEndpoint=enabled"
-```
-
-Atau update existing worker:
-```bash
-aws ec2 modify-instance-metadata-options \
-    --instance-id <worker_id> \
-    --http-tokens optional
-```
-
-### Issue 9: Worker tidak bisa akses S3 (stuck di Stage 0 read)
-
-**Gejala:** Worker registered, executor running, tapi Stage 0 (parquet read) tidak progress. CPU executor idle (~2%), `tasks 0/1`, `bytes read 0`.
-
-**Diagnosa:** SSH ke worker, test akses S3:
-```bash
-ssh ec2-user@<worker_ip> "aws s3 ls s3://<bucket>/ --region ap-southeast-1"
-# Stuck/timeout → worker tidak bisa reach S3 endpoint
-```
-
-**Penyebab:** Worker subnet tidak auto-assign public IP, dan tidak ada:
-- NAT Gateway (untuk private subnet outbound)
-- VPC Endpoint untuk S3 (gateway endpoint)
-
-S3 endpoint butuh internet route. Tanpa public IP/NAT/VPC endpoint, worker tidak bisa keluar.
-
-**Solusi (pilih salah satu):**
-
-1. **Enable subnet auto-assign public IP**:
-   ```bash
-   aws ec2 modify-subnet-attribute \
-       --subnet-id <subnet_id> \
-       --map-public-ip-on-launch
-   ```
-
-2. **Launch worker dengan `--network-interfaces` flag** yang explicit set `AssociatePublicIpAddress=true` (sudah dipakai di `run_with_worker.sh`).
-
-3. **Buat VPC Endpoint untuk S3** (paling clean, gratis, tidak butuh public IP).
-
-### Issue 10: SSH host key conflict saat IP worker recycled
-
-**Gejala:**
-```
-WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!
-Host key verification failed.
-```
-
-**Penyebab:** AWS recycle private IP — worker baru punya IP yang sama dengan worker lama, tapi host key berbeda. SSH client refuse connect.
-
-**Solusi:** Jangan simpan host key. Tambahkan `-o UserKnownHostsFile=/dev/null` di SSH command (sudah dipakai di `run_with_worker.sh`):
-```bash
-ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ec2-user@<worker_ip>
-```
-
-Atau hapus entry lama:
-```bash
-ssh-keygen -R <worker_ip>
-```
-
-### Issue 11: Disk space habis di worker (No space left on device)
-
-**Gejala:**
-```
-ERROR TaskSchedulerImpl: Lost executor X on Y: Unable to create executor due to No space left on device
-```
-
-**Penyebab:** EBS volume worker terlalu kecil. Spark executor butuh disk untuk:
-- Maven `--packages` jars (~250MB)
-- Shuffle intermediate files (bisa GB untuk dataset besar)
-- Cache spill ke disk kalau memory tidak cukup
-- Spark logs + work directory
-
-EBS 8GB default tidak cukup. Untuk dataset 1M records, **30GB minimum**.
-
-**Solusi:** Naikkan VolumeSize di `aws ec2 run-instances`:
-```bash
---block-device-mappings "DeviceName=/dev/xvda,Ebs={VolumeSize=30,VolumeType=gp3,DeleteOnTermination=true}"
-```
-
-Untuk dataset > 5M records, pertimbangkan 50GB+ atau instance dengan instance store.
-
-### Issue 12: Heartbeat timeout / Worker lost
-
-**Gejala:**
-```
-WARN HeartbeatReceiver: Removing executor X with no recent heartbeats: 155816 ms exceeds timeout 120000 ms
-ERROR TaskSchedulerImpl: Lost executor X: Executor heartbeat timed out
-```
-
-**Penyebab:** Executor JVM stop-the-world GC pause panjang karena memory pressure. Common di t3.small dengan dataset besar — heap kecil, GC frequent dan lama.
-
-**Solusi:**
-- Naikkan worker instance type (t3.medium 4GB, atau lebih)
-- Naikkan `--executor-memory` proportional dengan instance memory
-- Untuk dataset besar, jangan pakai `df.cache()` (let it spill alami daripada GC thrash)
-- Tune G1GC: `--conf spark.executor.extraJavaOptions="-XX:+UseG1GC -XX:G1HeapRegionSize=4M"`
-
-**Trade-off:** Free-tier hardware ada limit. Untuk benchmark dataset besar (10M+ records), perlu r5.xlarge atau lebih.
-
----
-
-## Troubleshooting Cheatsheet
-
-### Quick health check
+#### Quick health check
 
 ```bash
 # Spark Master alive?
@@ -508,7 +484,7 @@ ps aux | grep spark-submit | grep -v grep
 APP_ID=$(curl -s localhost:8080/json/ | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['activeapps'][0]['id'] if d['activeapps'] else 'NO_APP')")
 ```
 
-### Diagnose stuck job
+#### Diagnose stuck job
 
 ```bash
 # Stage progress
@@ -523,26 +499,25 @@ import json, sys
 for w in json.load(sys.stdin)['workers']:
     print(f\"{w['host']}: cores {w['coresused']}/{w['cores']}, mem {w['memoryused']}/{w['memory']}MB\")"
 
-# Worker disk + load (replace WORKER_IP)
+# Worker disk + load
 ssh -i ~/.ssh/iot-worker-key -o UserKnownHostsFile=/dev/null \
     ec2-user@<WORKER_IP> "df -h / && uptime && free -h"
 ```
 
-### Diagnose DB connectivity
+#### DB connectivity dari worker
 
 ```bash
-# Cek koneksi aktif ke DB primary (run di datalayer-1)
-sudo -u postgres psql -c "SELECT client_addr, state FROM pg_stat_activity WHERE client_addr IS NOT NULL;"
+ssh ec2-user@<worker_ip> "nc -zv <datalayer-1_ip> 5432 -w 5"
 
-# Test connectivity dari worker ke DB
-ssh ec2-user@<worker_ip> "nc -zv 10.0.1.247 5432 -w 5"
+# Atau cek dari datalayer side
+sudo -u postgres psql -c "SELECT client_addr, state FROM pg_stat_activity WHERE client_addr IS NOT NULL;"
 ```
 
-### Cleanup stale state
+#### Cleanup stale state
 
 ```bash
 # Restart Spark Master (clear stale apps)
-$SPARK_HOME/sbin/stop-master.sh && $SPARK_HOME/sbin/start-master.sh --host 10.0.1.127
+$SPARK_HOME/sbin/stop-master.sh && $SPARK_HOME/sbin/start-master.sh --host <vpc_ip>
 
 # Force terminate orphan workers
 aws ec2 describe-instances --region ap-southeast-1 \
@@ -551,7 +526,7 @@ aws ec2 describe-instances --region ap-southeast-1 \
     xargs -I {} aws ec2 terminate-instances --region ap-southeast-1 --instance-ids {}
 ```
 
-### Query benchmark results
+#### Query benchmark results
 
 ```bash
 sudo -u postgres psql -d iot_db -c "

@@ -1,37 +1,45 @@
-# Runbook: Setup PostgreSQL 16 + TimescaleDB on Amazon Linux 2023
+# Runbook: PostgreSQL 16 + TimescaleDB Setup
 
-> Dokumentasi step-by-step yang **benar-benar berhasil** untuk setup DB Primary + Replica
-> di Amazon Linux 2023 (EC2). Berdasarkan pengalaman setup 24 Mei 2026.
-
----
-
-## Known Issues & Lessons Learned
-
-| Issue | Penyebab | Solusi |
-|-------|----------|--------|
-| `timescaledb-tune`: fork/exec pg_config: no such file or directory | Package `postgresql16-private-devel` belum terinstall saat `timescaledb-tune` dijalankan | Skip `timescaledb-tune`, manual config `shared_preload_libraries` di postgresql.conf |
-| `could not access file "timescaledb": No such file or directory` saat PostgreSQL start | TimescaleDB package (el9/PGDG) install `.so` ke path berbeda dari Amazon Linux PostgreSQL | Symlink `.so` files ke `/usr/lib64/pgsql/` |
-| `extension "timescaledb" is not available` saat CREATE EXTENSION | `.control` dan `.sql` files tidak ada di `/usr/share/pgsql/extension/` | Symlink `.control` dan `--*.sql` files ke `/usr/share/pgsql/extension/` |
-| `pg_basebackup: connection timed out` | Security group belum allow inbound 5432 dari IP replica | Update SG: allow inbound TCP 5432 dari `10.0.1.0/24` |
-
-**Root cause utama:** PostgreSQL dari Amazon Linux repo (`@amazonlinux`) dan TimescaleDB dari packagecloud (`@timescaledb`, built for PGDG el9) menggunakan directory layout yang berbeda. Perlu symlink manual.
+> Step-by-step setup DB Primary + Replica di Amazon Linux 2023 (EC2). Tested working — semua issue yang ditemui terdokumentasi di [Troubleshooting](#troubleshooting--common-issues).
 
 ---
 
-## datalayer-1 — DB Primary
+## Topology
+
+```
+iot-bigdata-applayer-1 (App Layer)
+    │
+    │  TCP 5432
+    ▼
+iot-bigdata-datalayer-1 (DB Primary)  ───── streaming replication ─────►  iot-bigdata-datalayer-2 (DB Replica)
+    10.0.1.247                                                                     10.0.1.78
+```
+
+**Naming convention:** `iot-bigdata-{layer}-{index}` (disiapkan untuk horizontal scaling).
+
+| Pattern | Contoh | Role |
+|---------|--------|------|
+| `iot-bigdata-applayer-x` | `iot-bigdata-applayer-1` | FastAPI, MQTT, Grafana, Spark Master |
+| `iot-bigdata-datalayer-x` | `iot-bigdata-datalayer-1` | PostgreSQL Primary/Replica |
+| `iot-bigdata-worker-x` | `iot-bigdata-worker-1` | Ephemeral Spark workers |
+
+---
+
+## Setup datalayer-1 — Primary
 
 ### Prerequisites
+
 - Amazon Linux 2023 (EC2 t3.small)
 - Security Group: inbound TCP 5432 dari `10.0.1.0/24`
 
-### Step 1: Install PostgreSQL 16
+### 1. Install PostgreSQL 16
 
 ```bash
 sudo dnf install -y postgresql16-server postgresql16-contrib postgresql16-private-devel
 sudo postgresql-setup --initdb
 ```
 
-### Step 2: Install TimescaleDB
+### 2. Install TimescaleDB
 
 ```bash
 sudo bash -c 'cat > /etc/yum.repos.d/timescaledb.repo <<EOF
@@ -45,7 +53,9 @@ EOF'
 sudo dnf install -y timescaledb-2-postgresql-16
 ```
 
-### Step 3: Fix TimescaleDB paths (Amazon Linux 2023 compatibility)
+### 3. Fix TimescaleDB paths (Amazon Linux 2023 compatibility)
+
+Package TimescaleDB built for PGDG path layout, sedangkan PostgreSQL Amazon Linux pakai layout berbeda. Perlu symlink manual:
 
 ```bash
 # .so files
@@ -53,14 +63,14 @@ sudo ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.so /usr/lib64/pgsql/
 sudo ln -sf /usr/lib64/timescaledb-pg16/timescaledb-2.27.1.so /usr/lib64/pgsql/
 sudo ln -sf /usr/lib64/timescaledb-pg16/timescaledb-tsl-2.27.1.so /usr/lib64/pgsql/
 
-# Extension control file
+# Extension files
 sudo ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.control /usr/share/pgsql/extension/
-
-# Extension SQL files
 sudo ln -sf /usr/lib64/timescaledb-pg16/timescaledb--*.sql /usr/share/pgsql/extension/
 ```
 
-### Step 4: Configure PostgreSQL
+### 4. Configure PostgreSQL
+
+`postgresql.conf`:
 
 ```bash
 sudo bash -c 'cat >> /var/lib/pgsql/data/postgresql.conf <<EOF
@@ -77,25 +87,27 @@ listen_addresses = '"'"'*'"'"'
 EOF'
 ```
 
+`pg_hba.conf` (ganti `<db_user>` dan `<datalayer-2_ip>` dengan value actual):
+
 ```bash
 sudo bash -c 'cat >> /var/lib/pgsql/data/pg_hba.conf <<EOF
 
-# App node + services (subnet)
+# App + services
 host    all             <db_user>        10.0.1.0/24       scram-sha-256
 
 # Replication from datalayer-2
-host    replication     replicator       <node3_ip>/32     scram-sha-256
+host    replication     replicator       <datalayer-2_ip>/32   scram-sha-256
 EOF'
 ```
 
-### Step 5: Start PostgreSQL
+### 5. Start PostgreSQL
 
 ```bash
 sudo systemctl enable postgresql
 sudo systemctl start postgresql
 ```
 
-### Step 6: Create users, database, replication slot
+### 6. Create users, database, replication slot
 
 ```bash
 sudo -u postgres psql <<EOF
@@ -107,14 +119,14 @@ SELECT pg_create_physical_replication_slot('node3_replica_slot');
 EOF
 ```
 
-### Step 7: Initialize schema
+### 7. Initialize schema
 
 ```bash
 # Copy init.sql ke node terlebih dahulu (scp db/init.sql <node>:/tmp/)
 sudo -u postgres psql -d <db_name> -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
 sudo -u postgres psql -d <db_name> -f /tmp/init.sql
 
-# Fix ownership
+# Fix table ownership
 sudo -u postgres psql -d <db_name> -c "
 ALTER TABLE sensor_readings OWNER TO <db_user>;
 ALTER TABLE devices OWNER TO <db_user>;
@@ -132,21 +144,21 @@ sudo -u postgres psql -d <db_name> -c "SELECT extname, extversion FROM pg_extens
 sudo -u postgres psql -d <db_name> -c "\dt"
 sudo -u postgres psql -d <db_name> -c "SELECT hypertable_name FROM timescaledb_information.hypertables;"
 sudo -u postgres psql -c "SELECT slot_name, active FROM pg_replication_slots;"
-sudo -u postgres psql -c "\du"
 sudo -u postgres psql -c "SHOW listen_addresses;"
 sudo -u postgres psql -c "SHOW wal_level;"
 ```
 
 ---
 
-## datalayer-2 — DB Replica
+## Setup datalayer-2 — Replica
 
 ### Prerequisites
+
 - Amazon Linux 2023 (EC2 t3.small, same spec as datalayer-1)
 - Security Group: inbound TCP 5432 dari `10.0.1.0/24`
 - datalayer-1 (primary) sudah running dan replication slot sudah dibuat
 
-### Step 1: Install PostgreSQL 16
+### 1. Install PostgreSQL 16
 
 ```bash
 sudo dnf install -y postgresql16-server postgresql16-contrib postgresql16-private-devel
@@ -154,7 +166,7 @@ sudo dnf install -y postgresql16-server postgresql16-contrib postgresql16-privat
 
 > **Jangan** jalankan `postgresql-setup --initdb` — data directory akan diisi oleh `pg_basebackup`.
 
-### Step 2: Install TimescaleDB
+### 2. Install TimescaleDB
 
 ```bash
 sudo bash -c 'cat > /etc/yum.repos.d/timescaledb.repo <<EOF
@@ -168,7 +180,7 @@ EOF'
 sudo dnf install -y timescaledb-2-postgresql-16
 ```
 
-### Step 3: Fix TimescaleDB paths
+### 3. Fix TimescaleDB paths
 
 ```bash
 sudo ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.so /usr/lib64/pgsql/
@@ -178,13 +190,13 @@ sudo ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.control /usr/share/pg
 sudo ln -sf /usr/lib64/timescaledb-pg16/timescaledb--*.sql /usr/share/pgsql/extension/
 ```
 
-### Step 4: Base backup from primary
+### 4. Base backup from primary
 
 ```bash
 sudo rm -rf /var/lib/pgsql/data
 
 sudo PGPASSWORD='<db_password>' pg_basebackup \
-    -h <node2_private_ip> \
+    -h <datalayer-1_ip> \
     -U replicator \
     -D /var/lib/pgsql/data \
     -Fp -Xs -P -R \
@@ -196,7 +208,7 @@ sudo chmod 700 /var/lib/pgsql/data
 
 > Flag `-R` otomatis membuat `standby.signal` dan `primary_conninfo` di `postgresql.auto.conf`.
 
-### Step 5: Configure replica settings
+### 5. Configure replica settings
 
 ```bash
 sudo bash -c 'cat >> /var/lib/pgsql/data/postgresql.conf <<EOF
@@ -207,7 +219,7 @@ primary_slot_name = '"'"'node3_replica_slot'"'"'
 EOF'
 ```
 
-### Step 6: Start PostgreSQL (replica mode)
+### 6. Start PostgreSQL (replica mode)
 
 ```bash
 sudo systemctl enable postgresql
@@ -235,7 +247,7 @@ INSERT INTO devices (device_id, device_name, location)
 VALUES ('test_repl', 'Replication Test', 'test_area');
 "
 
-# Di datalayer-2 (replica) — harus muncul
+# Di datalayer-2 (replica) — harus muncul (tunggu 1-2 detik)
 sudo -u postgres psql -d <db_name> -c "
 SELECT * FROM devices WHERE device_id = 'test_repl';
 "
@@ -246,31 +258,31 @@ sudo -u postgres psql -d <db_name> -c "DELETE FROM devices WHERE device_id = 'te
 
 ---
 
-## Read Replica Utilization (Grafana)
+## Read Replica Utilization
 
-Replica tidak hanya jadi standby — dimanfaatkan untuk **distribusi load**: dashboard query Grafana di-route ke replica, sementara primary fokus melayani write workload + alert evaluation.
+Replica tidak hanya jadi standby — dimanfaatkan untuk **distribusi load** workload read-only.
 
 ### Strategi
 
-| Workload | Datasource | Alasan |
-|----------|------------|--------|
-| Dashboard panel (read query) | `TimescaleDB-Replica` (default) | Banyak query, bisa toleransi lag <1s |
-| Alert rules evaluation | `TimescaleDB` (primary) | Butuh data real-time, tidak boleh delay |
-| Backend FastAPI | Primary | Transactional read + write |
-| Spark JDBC write | Primary | Hanya primary yang menerima write |
+| Workload | Target | Alasan |
+|----------|--------|--------|
+| Grafana dashboard panel | Replica (default) | Banyak query, bisa toleransi lag <1s |
+| Grafana alert evaluation | Primary | Butuh data real-time |
+| Backend FastAPI (insert) | Primary | Write-only |
+| Spark `batch_analytics.py` (write hasil) | Primary | INSERT analytics + anomaly events |
+| Spark `export_to_parquet.py` (read raw) | Replica | Large read query, time-tolerant |
 
 ### Setup
 
 **1. Pastikan replica reachable dari applayer-1:**
 
 ```bash
-# Dari applayer-1
-nc -zv <datalayer-2-ip> 5432 -w 5
+nc -zv <datalayer-2_ip> 5432 -w 5
 ```
 
-**2. Pastikan `pg_hba.conf` di replica allow koneksi dari applayer:**
+**2. Apply pg_hba.conf fix di replica:**
 
-PostgreSQL streaming replication hanya menyalin data, **bukan file konfigurasi**. Apply fix yang sama seperti di primary:
+PostgreSQL replication hanya menyalin data, **bukan file konfigurasi**. Apply fix yang sama seperti di primary:
 
 ```bash
 # SSH ke datalayer-2
@@ -284,109 +296,110 @@ sudo -u postgres psql -c "SELECT pg_reload_conf();"
 **3. Update `infra/.env` di applayer-1:**
 
 ```
-POSTGRES_HOST=<datalayer-1-ip>          # primary, untuk write + alert
-POSTGRES_HOST_REPLICA=<datalayer-2-ip>  # replica, untuk dashboard
+POSTGRES_HOST=<datalayer-1_ip>          # primary, untuk write + alert
+POSTGRES_HOST_REPLICA=<datalayer-2_ip>  # replica, untuk dashboard + export
 ```
 
-**4. Recreate Grafana container** (bukan restart — env baru tidak ke-load dengan restart biasa):
+**4. Recreate Grafana container** (env baru tidak ke-load oleh `restart` biasa):
 
 ```bash
 cd ~/iot-bigdata-project/infra
 docker compose up -d --force-recreate grafana
 ```
 
-**5. Verifikasi di Grafana UI:**
+**5. Verifikasi:**
 
-- Buka **Configuration → Data sources**
-- Harus ada 2 datasource: `TimescaleDB` dan `TimescaleDB-Replica`
+- Grafana UI → **Configuration → Data sources** → harus ada 2 datasource
 - `TimescaleDB-Replica` ditandai sebagai **default**
-- Test connection — keduanya harus return "Database Connection OK"
+- Test connection keduanya → "Database Connection OK"
 
 ### Verifikasi Load Distribution
 
-Saat dashboard di-buka, cek koneksi aktif:
+Saat dashboard di-buka, koneksi aktif di replica:
 
 ```bash
-# Di datalayer-2 (replica) — harus muncul koneksi dari applayer
-sudo -u postgres psql -c "SELECT client_addr, query_start, state FROM pg_stat_activity WHERE state IS NOT NULL AND client_addr IS NOT NULL;"
+# Di datalayer-2
+sudo -u postgres psql -c "
+SELECT client_addr, query_start, state
+FROM pg_stat_activity
+WHERE state IS NOT NULL AND client_addr IS NOT NULL;"
 ```
 
-### Trade-off & Caveat
+Harus ada koneksi dari applayer (`10.0.1.127`) yang query `sensor_readings`.
+
+### Trade-off
 
 | Aspek | Konsekuensi |
 |-------|-------------|
-| **Replication lag** | Data di replica beberapa milidetik di belakang primary. Tidak masalah untuk dashboard, fatal untuk alert. |
-| **Replica down** | Dashboard down. Mitigasi: fallback ke primary via Grafana datasource health check, atau update `POSTGRES_HOST_REPLICA` ke primary IP. |
-| **Failover** | Saat primary down dan replica di-promote jadi primary baru, datasource replica jadi tidak useful. Update `POSTGRES_HOST_REPLICA` ke IP rebuilt-replica. |
+| Replication lag | Data di replica beberapa milidetik di belakang. Tidak masalah untuk dashboard, fatal untuk alert (alert tetap di primary). |
+| Replica down | Dashboard down. Mitigasi: update `POSTGRES_HOST_REPLICA` ke primary IP, recreate Grafana. |
+| Failover | Setelah promote replica jadi primary, `POSTGRES_HOST_REPLICA` perlu diupdate ke IP rebuilt-replica. |
 
-### Fallback saat Replica Down
+---
 
-Quick fix tanpa perlu modify dashboard:
+## Troubleshooting & Common Issues
 
+### Setup Issues
+
+#### `timescaledb-tune`: fork/exec pg_config: no such file
+
+**Penyebab:** `postgresql16-private-devel` belum terinstall.
+
+**Solusi:** Skip `timescaledb-tune` (opsional). Manual config `shared_preload_libraries` di `postgresql.conf` (sudah dilakukan di Step 4).
+
+#### `could not access file "timescaledb"` saat PostgreSQL start
+
+**Penyebab:** TimescaleDB `.so` tidak ada di path yang Amazon Linux PostgreSQL cari.
+
+**Solusi:** Symlink files (sudah ada di Step 3).
+
+#### `extension "timescaledb" is not available` saat CREATE EXTENSION
+
+**Penyebab:** `.control` dan `.sql` files tidak di `/usr/share/pgsql/extension/`.
+
+**Solusi:** Symlink files (sudah ada di Step 3).
+
+#### `pg_basebackup: connection timed out`
+
+**Penyebab:** Security group belum allow inbound 5432 dari IP replica.
+
+**Solusi:** Update SG datalayer — allow inbound TCP 5432 dari `10.0.1.0/24` atau dari SG worker spesifik.
+
+#### `pg_hba.conf entry for host` (literal `<db_user>` di file)
+
+**Penyebab:** Saat setup manual, placeholder `<db_user>` tidak di-replace.
+
+**Solusi:**
 ```bash
-# Di applayer-1 — point replica datasource ke primary
-sed -i 's/^POSTGRES_HOST_REPLICA=.*/POSTGRES_HOST_REPLICA=<datalayer-1-ip>/' ~/iot-bigdata-project/infra/.env
-docker compose restart grafana
+sudo sed -i 's/<db_user>/<actual_username>/' /var/lib/pgsql/data/pg_hba.conf
+sudo -u postgres psql -c "SELECT pg_reload_conf();"
 ```
 
----
+> **Penting:** Replication tidak menyalin file konfigurasi. Apply manual di replica juga.
 
-## Topology Summary
+### Application Layer Issues
 
-```
-iot-bigdata-applayer-1 (App Layer)
-    │
-    │  TCP 5432
-    ▼
-iot-bigdata-datalayer-1 (DB Primary) ─── streaming replication ───► iot-bigdata-datalayer-2 (DB Replica)
-    10.0.1.247                                                                  10.0.1.78
-```
+#### Grafana alert error `result-set has errors that can be retried`
 
-### Naming Convention
+**Penyebab:** Alert query `sensor_readings` yang masih kosong/belum cukup data dalam time range.
 
-```
-iot-bigdata-{layer}-{index}
-```
+**Solusi:** Bukan error kritis — hilang sendiri setelah data terkumpul. Tidak perlu action.
 
-| Pattern | Contoh | Keterangan |
-|---------|--------|------------|
-| `iot-bigdata-applayer-x` | `iot-bigdata-applayer-1` | Application layer (FastAPI, MQTT, Grafana, Spark Master) |
-| `iot-bigdata-datalayer-x` | `iot-bigdata-datalayer-1` | Database layer (PostgreSQL Primary/Replica) |
-| `iot-bigdata-worker-x` | `iot-bigdata-worker-1` | Ephemeral Spark workers |
+#### Grafana gagal start: `receiver 'telegram-alert' does not exist`
 
-> Index dimulai dari 1. Naming disiapkan untuk horizontal scaling (pool) di masa depan.
-
----
-
-## Post-Setup Issues & Fixes
-
-### Grafana alert rule error setelah fresh deploy
-
-**Gejala:** Log Grafana menampilkan `the result-set has errors that can be retried` berulang.
-
-**Penyebab:** Alert rules query `sensor_readings` yang masih kosong atau belum punya data dalam time range yang di-evaluate. Grafana alert evaluator retry terus sampai data tersedia.
-
-**Solusi:** Bukan error kritis — hilang sendiri setelah data cukup terkumpul (beberapa menit setelah simulator jalan). Tidak perlu action.
-
-### Grafana contact-points.yaml missing
-
-**Gejala:** Grafana gagal start dengan error `receiver 'telegram-alert' does not exist`.
-
-**Penyebab:** `contact-points.yaml` tidak di-commit ke git (berisi credentials). Policies reference contact point yang belum ada.
+**Penyebab:** `contact-points.yaml` tidak di-commit (berisi credentials).
 
 **Solusi:**
 ```bash
 cd grafana/provisioning/alerting/
 cp contact-points.yaml.example contact-points.yaml
-# Isi TELEGRAM_BOT_TOKEN dan TELEGRAM_CHAT_ID
+# Edit dengan TELEGRAM_BOT_TOKEN dan TELEGRAM_CHAT_ID
 docker compose restart grafana
 ```
 
-### Mosquitto passwd file menjadi directory
+#### Mosquitto: `passwd is not a file`
 
-**Gejala:** `Error: /mosquitto/config/passwd is not a file`
-
-**Penyebab:** Docker auto-create mount target sebagai directory ketika file belum ada di host.
+**Penyebab:** Docker auto-create mount target sebagai directory ketika file belum ada.
 
 **Solusi:**
 ```bash
@@ -400,109 +413,62 @@ sudo chmod 644 mosquitto/passwd
 docker compose restart mosquitto
 ```
 
-### pg_hba.conf entry literal `<db_user>` tidak ke-replace
+#### Docker Compose tidak load env baru setelah restart
 
-**Gejala:** Backend connect gagal dengan `no pg_hba.conf entry for host`. Saat cek, ada entry `<db_user>` literal di pg_hba.conf.
+**Penyebab:** `docker compose restart` hanya restart proses di container existing — tidak baca ulang env vars.
 
-**Penyebab:** Saat setup manual, placeholder `<db_user>` tidak diganti dengan nama user actual.
+**Solusi:** Pakai `docker compose up -d --force-recreate <service>`.
 
-**Solusi:**
-```bash
-sudo sed -i 's/<db_user>/<actual_username>/' /var/lib/pgsql/data/pg_hba.conf
-sudo -u postgres psql -c "SELECT pg_reload_conf();"
-```
+### Diagnostic Commands
 
-> **Penting:** PostgreSQL streaming replication **hanya menyalin data, bukan file konfigurasi**. Perubahan `pg_hba.conf`, `postgresql.conf`, atau settings lain di primary harus di-apply manual di replica juga. Saat read replica diaktifkan, jangan lupa apply fix yang sama di datalayer-2.
-
----
-
-## Troubleshooting Cheatsheet
-
-### Cek status PostgreSQL
+#### Service & Extension Status
 
 ```bash
-# Service status
 sudo systemctl status postgresql | head -5
-
-# Cek versi + extension
 sudo -u postgres psql -d iot_db -c "SELECT version();"
 sudo -u postgres psql -d iot_db -c "\dx"
-
-# Cek tabel + hypertable
 sudo -u postgres psql -d iot_db -c "\dt"
 sudo -u postgres psql -d iot_db -c "SELECT hypertable_name FROM timescaledb_information.hypertables;"
-
-# Cek users
-sudo -u postgres psql -c "\du"
 ```
 
-### Cek status replikasi
+#### Replication Health
 
-**Di primary (datalayer-1):**
+**Di primary:**
 ```bash
 sudo -u postgres psql -c "
-SELECT
-    client_addr,
-    state,
-    sent_lsn,
-    replay_lsn,
-    write_lag,
-    replay_lag
+SELECT client_addr, state, sent_lsn, replay_lsn, write_lag, replay_lag
 FROM pg_stat_replication;"
 
-# Cek replication slot
 sudo -u postgres psql -c "SELECT slot_name, active, restart_lsn FROM pg_replication_slots;"
 ```
 
-**Di replica (datalayer-2):**
+**Di replica:**
 ```bash
-# Konfirmasi replica mode
 sudo -u postgres psql -c "SELECT pg_is_in_recovery();"  # harus 't'
-
-# Cek receiver status
 sudo -u postgres psql -c "SELECT * FROM pg_stat_wal_receiver;"
 ```
 
-### Test replication end-to-end
-
-```bash
-# Di primary
-sudo -u postgres psql -d iot_db -c "INSERT INTO devices (device_id, device_name, location) VALUES ('test_repl', 'Test', 'test_area');"
-
-# Di replica (tunggu 1-2 detik)
-sudo -u postgres psql -d iot_db -c "SELECT * FROM devices WHERE device_id = 'test_repl';"
-# Harus muncul
-
-# Cleanup di primary
-sudo -u postgres psql -d iot_db -c "DELETE FROM devices WHERE device_id = 'test_repl';"
-```
-
-### Cek koneksi aktif
+#### Active Connections
 
 ```bash
 sudo -u postgres psql -c "
-SELECT
-    pid,
-    usename,
-    client_addr,
-    state,
-    LEFT(query, 50) as query_snippet
+SELECT pid, usename, client_addr, state, LEFT(query, 50) as query_snippet
 FROM pg_stat_activity
 WHERE state IS NOT NULL
 ORDER BY backend_start;"
 ```
 
-### Restart PostgreSQL safely
+#### Reload vs Restart
 
 ```bash
-# Reload config tanpa restart (untuk pg_hba.conf, postgresql.conf changes)
+# Reload config tanpa restart (untuk pg_hba.conf, postgresql.conf)
 sudo -u postgres psql -c "SELECT pg_reload_conf();"
 
-# Full restart (perlu untuk shared_preload_libraries change)
+# Full restart (perlu untuk shared_preload_libraries)
 sudo systemctl restart postgresql
 ```
 
-### Replication recovery (kalau replica out-of-sync)
+### Recovery: Replica Out-of-Sync
 
 Kalau replication slot inactive lama, WAL bisa di-recycle dan replica perlu rebuild:
 
