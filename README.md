@@ -334,3 +334,4 @@ spark-submit \
 - Worker node bersifat ephemeral — di-launch otomatis saat job, di-terminate setelah selesai.
 - Custom AMI worker (Amazon Linux 2023 + Java 21 + Spark 3.5.8).
 - Detail dokumentasi setup di `docs/runbook-db-setup.md` dan `docs/runbook-spark-setup.md`.
+- Detail konfigurasi infrastruktur AWS (VPC, SG, IAM) di `docs/aws-infrastructure.md`.

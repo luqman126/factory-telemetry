@@ -246,6 +246,78 @@ sudo -u postgres psql -d <db_name> -c "DELETE FROM devices WHERE device_id = 'te
 
 ---
 
+## Read Replica Utilization (Grafana)
+
+Replica tidak hanya jadi standby — dimanfaatkan untuk **distribusi load**: dashboard query Grafana di-route ke replica, sementara primary fokus melayani write workload + alert evaluation.
+
+### Strategi
+
+| Workload | Datasource | Alasan |
+|----------|------------|--------|
+| Dashboard panel (read query) | `TimescaleDB-Replica` (default) | Banyak query, bisa toleransi lag <1s |
+| Alert rules evaluation | `TimescaleDB` (primary) | Butuh data real-time, tidak boleh delay |
+| Backend FastAPI | Primary | Transactional read + write |
+| Spark JDBC write | Primary | Hanya primary yang menerima write |
+
+### Setup
+
+**1. Pastikan replica reachable dari applayer-1:**
+
+```bash
+# Dari applayer-1
+nc -zv <datalayer-2-ip> 5432 -w 5
+```
+
+**2. Update `infra/.env` di applayer-1:**
+
+```
+POSTGRES_HOST=<datalayer-1-ip>          # primary, untuk write + alert
+POSTGRES_HOST_REPLICA=<datalayer-2-ip>  # replica, untuk dashboard
+```
+
+**3. Restart Grafana untuk reload datasource:**
+
+```bash
+cd ~/iot-bigdata-project/infra
+docker compose restart grafana
+```
+
+**4. Verifikasi di Grafana UI:**
+
+- Buka **Configuration → Data sources**
+- Harus ada 2 datasource: `TimescaleDB` dan `TimescaleDB-Replica`
+- `TimescaleDB-Replica` ditandai sebagai **default**
+- Test connection — keduanya harus return "Database Connection OK"
+
+### Verifikasi Load Distribution
+
+Saat dashboard di-buka, cek koneksi aktif:
+
+```bash
+# Di datalayer-2 (replica) — harus muncul koneksi dari applayer
+sudo -u postgres psql -c "SELECT client_addr, query_start, state FROM pg_stat_activity WHERE state IS NOT NULL AND client_addr IS NOT NULL;"
+```
+
+### Trade-off & Caveat
+
+| Aspek | Konsekuensi |
+|-------|-------------|
+| **Replication lag** | Data di replica beberapa milidetik di belakang primary. Tidak masalah untuk dashboard, fatal untuk alert. |
+| **Replica down** | Dashboard down. Mitigasi: fallback ke primary via Grafana datasource health check, atau update `POSTGRES_HOST_REPLICA` ke primary IP. |
+| **Failover** | Saat primary down dan replica di-promote jadi primary baru, datasource replica jadi tidak useful. Update `POSTGRES_HOST_REPLICA` ke IP rebuilt-replica. |
+
+### Fallback saat Replica Down
+
+Quick fix tanpa perlu modify dashboard:
+
+```bash
+# Di applayer-1 — point replica datasource ke primary
+sed -i 's/^POSTGRES_HOST_REPLICA=.*/POSTGRES_HOST_REPLICA=<datalayer-1-ip>/' ~/iot-bigdata-project/infra/.env
+docker compose restart grafana
+```
+
+---
+
 ## Topology Summary
 
 ```
