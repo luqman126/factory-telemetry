@@ -268,21 +268,34 @@ Replica tidak hanya jadi standby — dimanfaatkan untuk **distribusi load**: das
 nc -zv <datalayer-2-ip> 5432 -w 5
 ```
 
-**2. Update `infra/.env` di applayer-1:**
+**2. Pastikan `pg_hba.conf` di replica allow koneksi dari applayer:**
+
+PostgreSQL streaming replication hanya menyalin data, **bukan file konfigurasi**. Apply fix yang sama seperti di primary:
+
+```bash
+# SSH ke datalayer-2
+sudo grep "10.0.1" /var/lib/pgsql/data/pg_hba.conf
+
+# Kalau masih ada literal <db_user>:
+sudo sed -i 's/<db_user>/<actual_username>/' /var/lib/pgsql/data/pg_hba.conf
+sudo -u postgres psql -c "SELECT pg_reload_conf();"
+```
+
+**3. Update `infra/.env` di applayer-1:**
 
 ```
 POSTGRES_HOST=<datalayer-1-ip>          # primary, untuk write + alert
 POSTGRES_HOST_REPLICA=<datalayer-2-ip>  # replica, untuk dashboard
 ```
 
-**3. Restart Grafana untuk reload datasource:**
+**4. Recreate Grafana container** (bukan restart — env baru tidak ke-load dengan restart biasa):
 
 ```bash
 cd ~/iot-bigdata-project/infra
-docker compose restart grafana
+docker compose up -d --force-recreate grafana
 ```
 
-**4. Verifikasi di Grafana UI:**
+**5. Verifikasi di Grafana UI:**
 
 - Buka **Configuration → Data sources**
 - Harus ada 2 datasource: `TimescaleDB` dan `TimescaleDB-Replica`
@@ -398,6 +411,8 @@ docker compose restart mosquitto
 sudo sed -i 's/<db_user>/<actual_username>/' /var/lib/pgsql/data/pg_hba.conf
 sudo -u postgres psql -c "SELECT pg_reload_conf();"
 ```
+
+> **Penting:** PostgreSQL streaming replication **hanya menyalin data, bukan file konfigurasi**. Perubahan `pg_hba.conf`, `postgresql.conf`, atau settings lain di primary harus di-apply manual di replica juga. Saat read replica diaktifkan, jangan lupa apply fix yang sama di datalayer-2.
 
 ---
 
