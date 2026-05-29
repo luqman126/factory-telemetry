@@ -71,11 +71,9 @@ sudo systemctl stop postgresql
 
 ```bash
 # Cek status service + log error
-sudo systemctl status <backend-service-name>
-sudo journalctl -u <backend-service-name> -n 30 --no-pager
+sudo systemctl status iot-backend
+sudo journalctl -u iot-backend -n 30 --no-pager
 ```
-
-> Ganti `<backend-service-name>` dengan nama service systemd backend (cek dengan `systemctl list-units | grep -i backend` atau `... | grep -i fastapi`).
 
 Backend gagal insert sensor data — error connection refused atau timeout ke `10.0.1.247:5432`.
 
@@ -171,10 +169,10 @@ docker compose up -d --force-recreate grafana
 docker compose restart mosquitto
 
 # Restart backend FastAPI (systemd)
-sudo systemctl restart <backend-service-name>
+sudo systemctl restart iot-backend
 
 # Verify backend up
-sudo systemctl status <backend-service-name> --no-pager | head -10
+sudo systemctl status iot-backend --no-pager | head -10
 ```
 
 ---
@@ -327,7 +325,7 @@ sed -i 's/^POSTGRES_HOST=.*/POSTGRES_HOST=10.0.1.247/' .env
 sed -i 's/^POSTGRES_HOST_REPLICA=.*/POSTGRES_HOST_REPLICA=10.0.1.247/' .env  # sementara, belum ada replica
 
 docker compose up -d --force-recreate grafana
-sudo systemctl restart <backend-service-name>
+sudo systemctl restart iot-backend
 ```
 
 ### 6.4 Verify e2e (sama dengan Phase 4)
