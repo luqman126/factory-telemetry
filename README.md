@@ -318,7 +318,7 @@ spark-submit \
 | 6     | Automasi ephemeral worker                       | ✅ Selesai  |
 | 7     | Evaluasi & analisis hasil scaling               | ✅ Selesai  |
 | 8     | Refactor topology: separate DB layer (ARCH-001) | ✅ Selesai  |
-| 9     | Failover simulation (manual primary failover)   | ⏳ Backlog  |
+| 9     | Failover simulation (manual primary failover)   | 🔧 SOP siap |
 
 ---
 
