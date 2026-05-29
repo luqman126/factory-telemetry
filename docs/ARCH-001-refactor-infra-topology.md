@@ -176,11 +176,12 @@ iot-bigdata-datalayer-2 → REPLICA (read-only, streaming replication)
 
 ### Phase 4 — Failover Simulation (Backlog)
 
-- [ ] Simulate: stop PostgreSQL di datalayer-1.
-- [ ] Execute failover SOP (promote datalayer-2).
-- [ ] Verify semua services reconnect ke primary baru.
-- [ ] Rebuild datalayer-1 sebagai replica dari datalayer-2.
-- [ ] Verify replication kembali normal.
+- [x] Simulate: stop PostgreSQL di datalayer-1.
+- [x] Execute failover SOP (promote datalayer-2).
+- [x] Verify semua services reconnect ke primary baru.
+- [x] Rebuild datalayer-1 sebagai replica dari datalayer-2.
+- [x] Verify replication kembali normal.
+- [x] Rollback ke state awal (datalayer-1 = primary).
 
 ---
 

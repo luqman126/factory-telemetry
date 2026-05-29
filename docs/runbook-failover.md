@@ -415,6 +415,22 @@ State akhir: ✓ datalayer-1 = primary, datalayer-2 = replica, naming slot konsi
 
 ## Common Issues During Failover
 
+### `chown` vs `chmod` typo saat fix permission
+
+**Gejala:** Setelah `pg_basebackup`, PostgreSQL gagal start. `journalctl` tidak jelas, atau bilang permission denied.
+
+**Penyebab:** Salah ketik `sudo chown 700 /var/lib/pgsql/data` (seharusnya `chmod 700`). `chown 700` ubah ownership ke UID 700 — postgres tidak bisa akses lagi.
+
+**Solusi:**
+```bash
+# Cek ownership
+sudo ls -ld /var/lib/pgsql/data
+# Kalau owner bukan postgres:postgres, fix:
+sudo chown -R postgres:postgres /var/lib/pgsql/data
+sudo chmod 700 /var/lib/pgsql/data
+sudo systemctl start postgresql
+```
+
 ### Backend tetap connect ke primary lama setelah update .env
 
 **Penyebab:** Connection pool masih hold koneksi lama. Atau backend tidak baca .env setelah startup.
