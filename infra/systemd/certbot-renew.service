@@ -1,0 +1,7 @@
+[Unit]
+Description=Certbot Renewal (Let's Encrypt cert untuk MQTT TLS)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/certbot renew --quiet
