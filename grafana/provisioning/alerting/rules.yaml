@@ -41,7 +41,7 @@ groups:
               expression: A
               conditions:
                 - evaluator:
-                    params: [45]
+                    params: [35]
                     type: gt
                   operator:
                     type: and
@@ -55,7 +55,7 @@ groups:
         for: 2m
         annotations:
           summary: "Suhu tinggi terdeteksi"
-          description: "Rata-rata suhu 1 menit terakhir melebihi 45°C"
+          description: "Rata-rata suhu 1 menit terakhir melebihi 35°C"
         labels:
           severity: critical
 
@@ -63,8 +63,8 @@ groups:
       # Kadar uap flux berbahaya — ruang penyolderan
       # Critical threshold: 75 ppm (sesuai DATA_CONTRACT)
       # ----------------------------------------------------------
-      - uid: high-flux-ppm
-        title: Hazardous Flux Vapor Detected
+      - uid: gas-hazard
+        title: Hazardous Gas Detected
         condition: C
         data:
           - refId: A
@@ -80,11 +80,10 @@ groups:
               format: table
               rawSql: |
                 SELECT
-                  avg(flux_ppm) as flux_ppm
+                  COUNT(*)::double precision as hazardous_count
                 FROM sensor_readings
                 WHERE time >= NOW() - INTERVAL '1 minute'
-                AND flux_ppm IS NOT NULL
-                AND location = 'ruang_penyolderan';
+                AND voc_level = 'HAZARDOUS';
               refId: A
           - refId: C
             datasourceUid: __expr__
@@ -93,7 +92,7 @@ groups:
               expression: A
               conditions:
                 - evaluator:
-                    params: [75]
+                    params: [0]
                     type: gt
                   operator:
                     type: and
@@ -106,8 +105,8 @@ groups:
         execErrState: Error
         for: 2m
         annotations:
-          summary: "Kadar uap flux berbahaya"
-          description: "Rata-rata flux_ppm 1 menit terakhir melebihi 75 ppm di ruang penyolderan"
+          summary: "Gas berbahaya terdeteksi"
+          description: "Terdeteksi status HAZARDOUS pada sensor gas dalam 1 menit terakhir"
         labels:
           severity: critical
 
@@ -145,7 +144,7 @@ groups:
               expression: A
               conditions:
                 - evaluator:
-                    params: [5]
+                    params: [0]
                     type: gt
                   operator:
                     type: and
@@ -159,6 +158,6 @@ groups:
         for: 2m
         annotations:
           summary: "Getaran berlebih terdeteksi"
-          description: "Rata-rata vibration_rms 1 menit terakhir melebihi 5 m/s² di ruang produksi"
+          description: "Rata-rata vibration_rms 1 menit terakhir melebihi 0 (terdeteksi getaran) di ruang produksi"
         labels:
           severity: critical

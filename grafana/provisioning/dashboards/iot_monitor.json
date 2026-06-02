@@ -37,8 +37,8 @@
       }
     },
     {
-      "id": 3,
-      "title": "MQ-135 Status - Ruang Penyolderan",
+      "id": 2,
+      "title": "Gas/Flux Status - Ruang Penyolderan",
       "type": "timeseries",
       "gridPos": {
         "x": 12,
@@ -92,11 +92,11 @@
       }
     },
     {
-      "id": 4,
+      "id": 3,
       "title": "Vibration RMS - Ruang Produksi",
       "type": "timeseries",
       "gridPos": {
-        "x": 12,
+        "x": 0,
         "y": 8,
         "w": 12,
         "h": 8
@@ -120,15 +120,11 @@
             "steps": [
               {
                 "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 2
+                "value": 0
               },
               {
                 "color": "red",
-                "value": 5
+                "value": 1
               }
             ]
           }
@@ -136,7 +132,7 @@
       }
     },
     {
-      "id": 5,
+      "id": 4,
       "title": "Anomali Terdeteksi (1 jam terakhir)",
       "type": "table",
       "gridPos": {

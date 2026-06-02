@@ -30,9 +30,9 @@ logger = logging.getLogger(__name__)
 # Threshold anomali — sesuai DATA_CONTRACT
 # ============================================================
 THRESHOLDS = {
-    "temperature":   {"warning": 35.0,  "critical": 45.0},
+    "temperature":   {"warning": 35.0,  "critical": 35.0},
     "humidity":      {"warning": 80.0,  "critical": 90.0},
-    "vibration_rms": {"warning": 2.0,   "critical": 5.0},
+    "vibration_rms": {"warning": 1.0,   "critical": 1.0},
     "flux_ppm":      {"warning": 35.0,  "critical": 75.0},
 }
 
@@ -204,7 +204,7 @@ def run(parquet_path: str, worker_count: int = 0):
     anomaly_dfs = []
     for sensor, thres in THRESHOLDS.items():
         anomaly_df = df.filter(
-            F.col(sensor).isNotNull() & (F.col(sensor) > thres["warning"])
+            F.col(sensor).isNotNull() & (F.col(sensor) >= thres["warning"])
         ).select(
             F.col("time").alias("event_time"),
             F.col("device_id"),
@@ -212,10 +212,24 @@ def run(parquet_path: str, worker_count: int = 0):
             F.lit(sensor).alias("sensor_type"),
             F.col(sensor).cast("double").alias("observed_value"),
             F.lit(thres["warning"]).alias("threshold_value"),
-            F.when(F.col(sensor) > thres["critical"], "CRITICAL")
+            F.when(F.col(sensor) >= thres["critical"], "CRITICAL")
              .otherwise("MEDIUM").alias("severity"),
         )
         anomaly_dfs.append(anomaly_df)
+
+    # Check voc_level string anomalies (GOOD vs HAZARDOUS)
+    voc_anomaly_df = df.filter(
+        F.col("voc_level").isNotNull() & (F.col("voc_level") == "HAZARDOUS")
+    ).select(
+        F.col("time").alias("event_time"),
+        F.col("device_id"),
+        F.col("location"),
+        F.lit("voc_level").alias("sensor_type"),
+        F.lit(1.0).alias("observed_value"),
+        F.lit(0.0).alias("threshold_value"),
+        F.lit("CRITICAL").alias("severity"),
+    )
+    anomaly_dfs.append(voc_anomaly_df)
 
     # Union all sensor anomalies
     anomaly_combined = anomaly_dfs[0]
