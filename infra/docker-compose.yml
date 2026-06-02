@@ -54,6 +54,27 @@ services:
     networks:
       - iot_net
 
+  # ----------------------------------------------------------
+  # Prometheus
+  # ----------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: iot_prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-remote-write-receiver'
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    networks:
+      - iot_net
+
 networks:
   iot_net:
     driver: bridge
@@ -62,3 +83,4 @@ volumes:
   mosquitto_data:
   mosquitto_log:
   grafana_data:
+  prometheus_data:

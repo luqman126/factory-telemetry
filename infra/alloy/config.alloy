@@ -1,0 +1,50 @@
+// ============================================================
+// config.alloy
+// Grafana Alloy Configuration for IoT Big Data Nodes
+// ============================================================
+
+// ------------------------------------------------------------
+// 1. INTEGRASI EXPORTER (Pengumpul Data)
+// ------------------------------------------------------------
+
+// Integrasi untuk mengumpulkan metrik sistem Host (CPU, RAM, Disk, Network)
+prometheus.exporter.unix "node_metrics" {
+  // Gunakan konfigurasi default
+}
+
+// Opsional: Aktifkan Exporter Postgres pada database nodes (datalayer-1 / datalayer-2)
+// Hapus tanda komentar (//) di bawah ini pada server database untuk memantau Postgres/TimescaleDB.
+//
+// prometheus.exporter.postgres "postgres_metrics" {
+//   data_source_names = ["postgresql://kagebyo:kagebyo126x@localhost:5432/iot_db?sslmode=disable"]
+// }
+
+
+// ------------------------------------------------------------
+// 2. SCRAPE JOBS (Proses Penarikan Data Exporter)
+// ------------------------------------------------------------
+
+// Menarik data metrik sistem host
+prometheus.scrape "scrape_node" {
+  targets    = prometheus.exporter.unix.node_metrics.targets
+  forward_to = [prometheus.remote_write.prometheus_server.receiver]
+}
+
+// Opsional: Menarik data metrik database Postgres
+// Hapus tanda komentar (//) di bawah ini pada server database untuk memantau Postgres/TimescaleDB.
+//
+// prometheus.scrape "scrape_postgres" {
+//   targets    = prometheus.exporter.postgres.postgres_metrics.targets
+//   forward_to = [prometheus.remote_write.prometheus_server.receiver]
+// }
+
+
+// ------------------------------------------------------------
+// 3. REMOTE WRITE (Pengiriman Terpusat ke Prometheus di applayer-1)
+// ------------------------------------------------------------
+prometheus.remote_write "prometheus_server" {
+  endpoint {
+    // Alamat IP Private applayer-1 server Prometheus
+    url = "http://10.0.1.127:9090/api/v1/write"
+  }
+}
