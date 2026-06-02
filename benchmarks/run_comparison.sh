@@ -126,6 +126,7 @@ echo ""
 # Prepare
 cd "$PROJECT_ROOT"
 ORIGINAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+COMPARE_BRANCH="${1:-$ORIGINAL_BRANCH}"
 mkdir -p "$RESULTS_DIR"
 
 # Copy benchmark scripts to temp dir so they survive branch switches
@@ -182,15 +183,24 @@ run_bench_spark "$RESULTS_DIR/main_spark.json"
 stop_backend
 
 # ============================================================
-# Step 3: Benchmark IMPROVED branch
+# Step 3: Benchmark COMPARISON branch / workspace changes
 # ============================================================
 echo ""
 echo "============================================"
-echo "  BENCHMARKING: feature/agent-improvements"
+echo "  BENCHMARKING: $COMPARE_BRANCH"
 echo "============================================"
 
 cd "$PROJECT_ROOT"
-git checkout feature/agent-improvements
+git checkout "$COMPARE_BRANCH"
+
+# If we are testing the original branch/workspace and we stashed changes,
+# pop the stash now so we benchmark the uncommitted modifications.
+if [ "$COMPARE_BRANCH" = "$ORIGINAL_BRANCH" ] && [ "$STASHED" = true ]; then
+    echo "[STEP 3] Applying stashed local changes for benchmark..."
+    git stash pop
+    STASHED=false
+fi
+
 start_backend
 
 run_bench_ingestion "realistic" "$RESULTS_DIR/improved_realistic.json"

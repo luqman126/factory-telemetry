@@ -68,11 +68,15 @@ def insert_test_data(conn):
             t = base_time + timedelta(seconds=i * 2)
             device_id = f"bench_spark_{(i % 3) + 1:03d}"
             temp = round(30 + random.gauss(0, 5), 2)
+            # 98% chance normal (0.0), 2% chance vibrating anomaly (1.0)
+            vibration = float(1 if random.random() < 0.02 else 0)
+            # 98% chance normal (GOOD), 2% chance hazard anomaly (HAZARDOUS)
+            voc = "HAZARDOUS" if random.random() < 0.02 else "GOOD"
             cur.execute(
                 """INSERT INTO sensor_readings
-                   (time, device_id, location, temperature, humidity)
-                   VALUES (%s, %s, %s, %s, %s)""",
-                (t, device_id, "bench_room", temp, round(55 + random.gauss(0, 3), 2))
+                   (time, device_id, location, temperature, humidity, vibration_rms, voc_level)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (t, device_id, "bench_room", temp, round(55 + random.gauss(0, 3), 2), vibration, voc)
             )
     conn.commit()
 

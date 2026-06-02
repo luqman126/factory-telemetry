@@ -44,6 +44,11 @@ def generate_report():
     improved_health = load_json("improved_health.json")
     improved_spark = load_json("improved_spark.json")
 
+    # Determine comparison branch name dynamically
+    compare_branch_name = "improved"
+    if improved_spark and "branch" in improved_spark:
+        compare_branch_name = improved_spark["branch"]
+
     # Build report
     lines = []
     lines.append("# Benchmark Comparison Report")
@@ -57,13 +62,13 @@ def generate_report():
     if main_realistic:
         lines.append(f"- **main** branch commit: `{main_realistic.get('git_commit', 'N/A')}`")
     if improved_realistic:
-        lines.append(f"- **feature/agent-improvements** commit: `{improved_realistic.get('git_commit', 'N/A')}`")
+        lines.append(f"- **{compare_branch_name}** commit: `{improved_realistic.get('git_commit', 'N/A')}`")
     lines.append("")
 
     # Ingestion throughput
     lines.append("## Ingestion Throughput")
     lines.append("")
-    lines.append("| Metric | main | improved | Change |")
+    lines.append(f"| Metric | main | {compare_branch_name} | Change |")
     lines.append("|--------|------|----------|--------|")
 
     if main_realistic and improved_realistic:
@@ -85,7 +90,7 @@ def generate_report():
     # Health check
     lines.append("## Health Check Depth")
     lines.append("")
-    lines.append("| Metric | main | improved |")
+    lines.append(f"| Metric | main | {compare_branch_name} |")
     lines.append("|--------|------|----------|")
 
     if main_health and improved_health:
@@ -99,7 +104,7 @@ def generate_report():
     # Spark idempotency
     lines.append("## Spark Job Idempotency")
     lines.append("")
-    lines.append("| Metric | main | improved |")
+    lines.append(f"| Metric | main | {compare_branch_name} |")
     lines.append("|--------|------|----------|")
 
     if main_spark and improved_spark:

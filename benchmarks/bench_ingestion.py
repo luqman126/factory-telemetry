@@ -46,6 +46,11 @@ def get_git_commit():
 
 
 def build_payload(device_id, location):
+    # 98% chance normal (0.0), 2% chance vibrating anomaly (1.0)
+    vibration_rms = float(1 if random.random() < 0.02 else 0)
+    # 98% chance normal (GOOD), 2% chance hazard anomaly (HAZARDOUS)
+    voc_level = "HAZARDOUS" if random.random() < 0.02 else "GOOD"
+
     return json.dumps({
         "time": datetime.now(timezone.utc).isoformat(),
         "device_id": device_id,
@@ -53,8 +58,8 @@ def build_payload(device_id, location):
         "temperature": round(25 + random.gauss(0, 2), 2),
         "humidity": round(55 + random.gauss(0, 3), 2),
         "accel_x": None, "accel_y": None, "accel_z": None,
-        "vibration_rms": None,
-        "flux_ppm": None, "flux_aqi": None, "voc_level": None,
+        "vibration_rms": vibration_rms,
+        "flux_ppm": None, "flux_aqi": None, "voc_level": voc_level,
     })
 
 

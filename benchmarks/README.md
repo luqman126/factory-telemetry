@@ -1,6 +1,6 @@
 # Benchmark & Comparison Suite
 
-Membandingkan performa antara branch `main` (original) dan `feature/agent-improvements` (improved).
+Membandingkan performa antara branch `main` (original) dan branch pembanding / workspace saat ini.
 
 ## Yang Diukur
 
@@ -20,7 +20,7 @@ cd benchmarks
 Script ini akan:
 1. Start Docker infra (TimescaleDB + Mosquitto)
 2. Checkout `main` → jalankan semua benchmark → simpan hasil
-3. Checkout `feature/agent-improvements` → jalankan semua benchmark → simpan hasil
+3. Checkout branch aktif asal / target → jalankan semua benchmark → simpan hasil
 4. Generate comparison report
 5. Cleanup (stop infra, restore branch)
 
