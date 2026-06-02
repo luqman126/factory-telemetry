@@ -61,7 +61,7 @@ BASELINE = {
         "accel_z":     9.81,   # gravitasi normal
     },
     "ruang_penyolderan": {
-        "temperature": 35.0,   # lebih panas karena proses soldering
+        "temperature": 32.0,   # lebih panas karena proses soldering
         "humidity":    55.0,
         "flux_ppm":    20.0,   # kadar uap flux normal
     },
@@ -125,34 +125,19 @@ def build_payload(device: dict) -> dict:
 
     # MPU6050 — accelerometer & getaran (ruang produksi)
     if "mpu6050" in sensors:
-        ax = noise(0.05)
-        ay = noise(0.05)
-        az = base["accel_z"] + noise(0.05)
-        rms = math.sqrt(ax**2 + ay**2 + az**2)
-        rms = maybe_anomaly(rms, threshold=2.0)
-        payload["accel_x"]        = round(ax, 4)
-        payload["accel_y"]        = round(ay, 4)
-        payload["accel_z"]        = round(az, 4)
-        payload["vibration_rms"]  = round(rms, 4)
+        # 98% bernilai 0 (normal), 2% peluang anomali/bergetar bernilai 1
+        vibration_status = 1 if random.random() < 0.02 else 0
+        payload["accel_x"]        = None
+        payload["accel_y"]        = None
+        payload["accel_z"]        = None
+        payload["vibration_rms"]  = float(vibration_status)
 
     # MQ-135 — uap flux / gas (ruang penyolderan)
     if "mq135" in sensors:
-        ppm = base["flux_ppm"] + noise(2.0)
-        ppm = max(0.0, maybe_anomaly(ppm, threshold=75.0))
-        aqi = int(ppm * 2)  # konversi sederhana ppm → AQI
-
-        if ppm <= 10:
-            voc = "GOOD"
-        elif ppm <= 35:
-            voc = "MODERATE"
-        elif ppm <= 75:
-            voc = "UNHEALTHY"
-        else:
-            voc = "HAZARDOUS"
-
-        payload["flux_ppm"] = round(ppm, 2)
-        payload["flux_aqi"] = min(aqi, 500)
-        payload["voc_level"] = voc
+        is_hazardous = random.random() < 0.02
+        payload["flux_ppm"] = None
+        payload["flux_aqi"] = None
+        payload["voc_level"] = "HAZARDOUS" if is_hazardous else "GOOD"
 
     return payload
 
