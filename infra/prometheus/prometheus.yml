@@ -19,41 +19,19 @@ rule_files:
 
 scrape_configs:
   # ----------------------------------------------------------
-  # 1. Prometheus Server self-monitoring
+  # 1. Prometheus Server self-monitoring (PULL Model)
+  #    Hanya memantau server Prometheus sendiri
   # ----------------------------------------------------------
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
 
-  # ----------------------------------------------------------
-  # 2. Grafana Alloy (Node & Exporter Metrics)
-  #    Memantau sistem CPU, RAM, Disk, Network dari 3 server
-  # ----------------------------------------------------------
-  - job_name: 'alloy_nodes'
-    static_configs:
-      - targets:
-          - '10.0.1.127:12345'              # applayer-1 (App & Spark Master)
-          - '10.0.1.247:12345'              # datalayer-1 (PostgreSQL Primary)
-          - '<datalayer-2-private-ip>:12345' # datalayer-2 (PostgreSQL Replica)
-    relabel_configs:
-      - source_labels: [__address__]
-        regex: '10.0.1.127:12345'
-        target_label: 'instance'
-        replacement: 'applayer-1'
-      - source_labels: [__address__]
-        regex: '10.0.1.247:12345'
-        target_label: 'instance'
-        replacement: 'datalayer-1-primary'
-      - source_labels: [__address__]
-        regex: '10.0.1.78:12345'
-        target_label: 'instance'
-        replacement: 'datalayer-2-replica'
+  # CATATAN ARSITEKTUR:
+  # Metrik host Unix (CPU, RAM, Disk) dan mesin database Postgres
+  # dari datalayer-1 dan datalayer-2 tidak ditarik (PULL) dari sini, 
+  # melainkan dikirimkan secara aktif (PUSH) oleh Grafana Alloy 
+  # melalui endpoint remote write receiver di port 9090.
+  #
+  # Dengan demikian, kita tidak perlu membuka port masuk (inbound)
+  # 12345 pada Security Group database AWS Anda. Ini jauh lebih aman.
 
-  # ----------------------------------------------------------
-  # 3. FastAPI Backend Application Metrics
-  #    (Dapat diaktifkan jika menggunakan prometheus-fastapi-instrumentator)
-  # ----------------------------------------------------------
-  - job_name: 'fastapi_backend'
-    metrics_path: '/metrics'
-    static_configs:
-      - targets: ['10.0.1.127:8000']

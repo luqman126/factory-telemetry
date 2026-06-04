@@ -166,7 +166,7 @@
       },
       "targets": [
         {
-          "expr": "pg_stat_database_numbackends{datname!~\"template.*\"}",
+          "expr": "pg_stat_database_numbackends{datname=\"iot_db\"}",
           "legendFormat": "{{instance}} ({{datname}})",
           "refId": "A"
         }
@@ -196,7 +196,7 @@
       },
       "targets": [
         {
-          "expr": "rate(pg_stat_database_xact_commit{datname!~\"template.*\"}[5m])",
+          "expr": "rate(pg_stat_database_xact_commit{datname=\"iot_db\"}[5m])",
           "legendFormat": "{{instance}} ({{datname}})",
           "refId": "A"
         }
@@ -226,7 +226,7 @@
       },
       "targets": [
         {
-          "expr": "rate(pg_stat_database_xact_rollback{datname!~\"template.*\"}[5m])",
+          "expr": "rate(pg_stat_database_xact_rollback{datname=\"iot_db\"}[5m])",
           "legendFormat": "{{instance}} ({{datname}})",
           "refId": "A"
         }
