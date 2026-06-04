@@ -1,0 +1,9 @@
+[Unit]
+Description=Timer for IoT Big Data Spark Analytics Pipeline
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

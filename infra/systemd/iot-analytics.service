@@ -1,0 +1,12 @@
+[Unit]
+Description=IoT Big Data Spark Analytics Pipeline
+After=network.target
+
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/home/ec2-user/iot-bigdata-project/spark-jobs
+EnvironmentFile=/home/ec2-user/iot-bigdata-project/infra/.env
+ExecStart=/bin/bash /home/ec2-user/iot-bigdata-project/spark-jobs/run_hourly_pipeline.sh
+StandardOutput=journal
+StandardError=journal
