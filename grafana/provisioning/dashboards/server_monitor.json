@@ -25,7 +25,7 @@
       },
       "targets": [
         {
-          "expr": "100 - (avg by (instance) (irate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)",
+          "expr": "100 - (avg by (instance) (irate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
@@ -196,7 +196,7 @@
       },
       "targets": [
         {
-          "expr": "rate(pg_stat_database_xact_commit{datname!~\"template.*\"}[1m])",
+          "expr": "rate(pg_stat_database_xact_commit{datname!~\"template.*\"}[5m])",
           "legendFormat": "{{instance}} ({{datname}})",
           "refId": "A"
         }
@@ -226,7 +226,7 @@
       },
       "targets": [
         {
-          "expr": "rate(pg_stat_database_xact_rollback{datname!~\"template.*\"}[1m])",
+          "expr": "rate(pg_stat_database_xact_rollback{datname!~\"template.*\"}[5m])",
           "legendFormat": "{{instance}} ({{datname}})",
           "refId": "A"
         }
