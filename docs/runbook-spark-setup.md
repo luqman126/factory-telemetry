@@ -274,6 +274,54 @@ Worker SG → datalayer SG (`<datalayer_sg>`):
 
 ---
 
+## Setup Automasi Pipeline Jam-an (Systemd Timer)
+
+Untuk mengotomatisasi jalannya pipeline Spark (penarikan data baru dari DB Replica, ekspor Parquet ke S3, pemrosesan analitik, dan penyimpanan ke DB Primary), kita menggunakan **Systemd Timer** di server `applayer-1`.
+
+### 1. Orkestrator: `run_hourly_pipeline.sh`
+
+Script orkestrator utama berada di `spark-jobs/run_hourly_pipeline.sh`.
+Alur kerja script ini:
+1. Pindah ke direktori `spark-jobs/`.
+2. Load environment variables dari `infra/.env`.
+3. Jalankan `export_to_parquet.py` di bawah virtual environment `.venv`.
+4. Deteksi output `S3 URI`. Jika bernilai `None` atau tidak ditemukan (tidak ada data baru dari sensor), keluar dengan sukses (`exit 0`).
+5. Jika ada S3 URI yang valid, picu `spark-submit` secara lokal (`local[*]`) dengan memori 512MB.
+
+### 2. Unit File Systemd
+
+* **Service File (`/etc/systemd/system/iot-analytics.service`):**
+  Menggunakan tipe `oneshot` untuk menjalankan orkestrator sebagai user `ec2-user`.
+* **Timer File (`/etc/systemd/system/iot-analytics.timer`):**
+  Menjalankan service di atas setiap jam (`OnCalendar=hourly`) secara persisten (`Persistent=true`).
+
+### 3. Langkah Aktivasi di `applayer-1`
+
+```bash
+# 1. Berikan permission execute pada script
+chmod +x ~/iot-bigdata-project/spark-jobs/run_hourly_pipeline.sh
+
+# 2. Salin unit file ke systemd
+sudo cp ~/iot-bigdata-project/infra/systemd/iot-analytics.service /etc/systemd/system/
+sudo cp ~/iot-bigdata-project/infra/systemd/iot-analytics.timer /etc/systemd/system/
+
+# 3. Reload systemd daemon
+sudo systemctl daemon-reload
+
+# 4. Tes jalankan service secara manual
+sudo systemctl start iot-analytics.service
+sudo journalctl -u iot-analytics.service -n 50 --no-pager
+
+# 5. Aktifkan timer otomatis
+sudo systemctl enable --now iot-analytics.timer
+
+# 6. Cek status timer
+sudo systemctl list-timers --all | grep iot-analytics
+```
+
+---
+
+
 ## Troubleshooting & Common Issues
 
 Issues digrupkan berdasarkan kategori. Untuk diagnostic commands, lihat [Diagnostic Commands](#diagnostic-commands) di bawah.

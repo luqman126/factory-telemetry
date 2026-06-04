@@ -29,32 +29,42 @@ Project ini sekaligus menjadi eksperimen distributed computing dengan membanding
 ```
 IoT Device / Simulator
         │
-        │  MQTT
+        │  MQTT (TLS: Port 8883)
         ▼
-Backend (FastAPI)               ← applayer-1
+Backend (FastAPI)               ← applayer-1 (FastAPI + MQTT Consumer)
         │
-        │  insert
+        │  1. Insert data sensor mentah (real-time)
         ▼
-PostgreSQL + TimescaleDB        ← datalayer-1 (Primary, bare-metal)
+PostgreSQL + TimescaleDB (Primary) ← datalayer-1 (bare-metal)
         │
-        ├── streaming replication
-        │         ▼
-        │   PostgreSQL Standby  ← datalayer-2 (Replica, bare-metal)
+        │  2. Streaming Replication (real-time)
+        ▼
+PostgreSQL Standby (Replica)    ← datalayer-2 (bare-metal)
         │
-        │  export Parquet
+        │  3. Ekspor ke Parquet lokal lalu upload (Jam-an)
         ▼
 Amazon S3 (Data Lake)
         │
-        │  s3a:// read
+        │  4. Baca data Parquet via s3a:// (Jam-an)
         ▼
-Apache Spark Cluster            ← applayer-1 (Master) + ephemeral workers
+Apache Spark (Local Mode [*])   ← applayer-1 (Master, diorkestrasikan oleh Systemd Timer)
         │
-        │  write hasil
+        │  5. Tulis hasil agregasi & anomali (distributed JDBC write)
         ▼
-PostgreSQL PRIMARY (datalayer-1)
+PostgreSQL + TimescaleDB (Primary) ← datalayer-1
         │
-        ▼
-Grafana Dashboard               ← applayer-1, container
+        └────────────────────────────────────────┐
+                                                 │ 6. Query data analitik
+                                                 ▼
+Grafana Dashboard               ← applayer-1 (Container)
+                                                 ▲
+                                                 │ 7. Query metrik server
+                                                 ▼
+Prometheus Server (Push Model)  ← applayer-1 (Container)
+        ▲
+        │  8. remote_write (Metrik Host & DB)
+        │
+Grafana Alloy (Host Agent)      ← Terinstall di semua node (applayer-1, datalayer-1, datalayer-2)
 ```
 
 ---
@@ -284,23 +294,29 @@ python simulator.py
 ```
 
 **6. Batch pipeline**
-```bash
-cd spark-jobs && source .venv/bin/activate
 
-# Export DB → S3
-python export_to_parquet.py
+* **Menjalankan Pipeline secara Manual (Ad-hoc):**
+  ```bash
+  cd spark-jobs && source .venv/bin/activate
 
-# Spark job local mode (tanpa worker)
-spark-submit \
-  --master "local[*]" \
-  --executor-memory 512m \
-  --driver-memory 512m \
-  --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261,org.postgresql:postgresql:42.7.4 \
-  batch_analytics.py s3://iot-bigdata-datalake-kagebyo/raw/<file>.parquet 0
+  # Orkestrasikan ekspor dan analisis secara berurutan secara lokal
+  chmod +x run_hourly_pipeline.sh
+  ./run_hourly_pipeline.sh
+  ```
 
-# Spark job dengan ephemeral worker (otomatis launch + terminate)
-./run_with_worker.sh s3://iot-bigdata-datalake-kagebyo/raw/<file>.parquet 2
-```
+* **Menjalankan Spark job dengan Ephemeral Worker (AWS CLI):**
+  ```bash
+  cd spark-jobs && source .venv/bin/activate
+  ./run_with_worker.sh s3://iot-bigdata-datalake-kagebyo/raw/<file>.parquet 2
+  ```
+
+* **Deploy Systemd Timer (Otomatis per Jam di Cloud AWS):**
+  Salin file unit systemd ke folder sistem dan aktifkan timernya:
+  ```bash
+  sudo cp infra/systemd/iot-analytics.* /etc/systemd/system/
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now iot-analytics.timer
+  ```
 
 ---
 
@@ -319,19 +335,20 @@ spark-submit \
 | 7     | Evaluasi & analisis hasil scaling               | ✅ Selesai  |
 | 8     | Refactor topology: separate DB layer (ARCH-001) | ✅ Selesai  |
 | 9     | Failover simulation (manual primary failover)   | ✅ Selesai  |
+| 10    | Automasi Pipeline Jam-an & Setup Monitoring     | ✅ Selesai  |
 
 ---
 
 ## Catatan
 
 - `.env` tidak di-commit ke git. Gunakan `.env.example` sebagai acuan.
-- `grafana/provisioning/alerting/contact-points.yaml` tidak di-commit. Gunakan `.example` sebagai acuan.
+- `grafana/provisioning/alerting/contact-points.yaml` tidak di-commit. Gunakan `.example` as acuan.
 - `infra/mosquitto/passwd` tidak di-commit (berisi hashed password). Generate ulang via `mosquitto_passwd`.
 - `db/init.sql` di datalayer-1 dijalankan sekali via provisioning script. Lihat `docs/runbook-db-setup.md`.
 - `spark-jobs/data/` tidak di-commit ke git.
 - Spark job dari applayer-1 selalu write ke DB Primary (datalayer-1), standby PostgreSQL bersifat read-only.
 - S3 access menggunakan IAM Role, tidak ada credentials yang disimpan di kode.
-- Worker node bersifat ephemeral — di-launch otomatis saat job, di-terminate setelah selesai.
+- Worker node bersifat ephemeral — di-launch otomatis saat job, di-terminate setelah selesai. (Opsional untuk scaling data masif di masa depan. Default saat ini menggunakan mode `local[*]` jam-an di applayer-1).
 - Custom AMI worker (Amazon Linux 2023 + Java 21 + Spark 3.5.8).
 - Detail dokumentasi setup di `docs/runbook-db-setup.md` dan `docs/runbook-spark-setup.md`.
 - Detail konfigurasi infrastruktur AWS (VPC, SG, IAM) di `docs/aws-infrastructure.md`.
