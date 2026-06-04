@@ -26,76 +26,108 @@ Project ini sekaligus menjadi eksperimen distributed computing dengan membanding
 
 ## Arsitektur
 
+### 1. Aliran Data Utama (Sistem Big Data)
+
+```text
+ ┌────────────────────────┐
+ │ IoT Device / Simulator │
+ └──────────┬─────────────┘
+            │ MQTT (TLS: Port 8883)
+            ▼
+ ┌────────────────────────┐
+ │    FastAPI Backend     │
+ │      (applayer-1)      │
+ └──────────┬─────────────┘
+            │ 1. Insert data sensor mentah (real-time)
+            ▼
+ ┌────────────────────────┐
+ │  Postgres TimescaleDB  │◄── 5. JDBC Write ──┐
+ │   Primary (datalayer-1)│     (Agregasi/     │
+ └──────────┬─────────────┘      Anomali)      │
+            │                                  │
+            │ 2. Streaming                     │
+            │    Replication                   │
+            ▼                                  │
+ ┌────────────────────────┐                    │
+ │  Postgres TimescaleDB  │                    │
+ │   Replica (datalayer-2)│                    │
+ └──────────┬─────────────┘                    │
+            │                                  │
+            │ 3. Export                        │
+            │    (Hourly Parquet)              │
+            ▼                                  │
+ ┌────────────────────────┐                    │
+ │ Amazon S3 (Data Lake)  │                    │
+ └──────────┬─────────────┘                    │
+            │                                  │
+            │ 4. Read (s3a://)                 │
+            ▼                                  │
+ ┌────────────────────────┐                    │
+ │      Apache Spark      ├────────────────────┘
+ │   Local (applayer-1)   │
+ └────────────────────────┘
 ```
-IoT Device / Simulator
-        │
-        │  MQTT (TLS: Port 8883)
-        ▼
-Backend (FastAPI)               ← applayer-1 (FastAPI + MQTT Consumer)
-        │
-        │  1. Insert data sensor mentah (real-time)
-        ▼
-PostgreSQL + TimescaleDB (Primary) ← datalayer-1 (bare-metal)
-        │
-        │  2. Streaming Replication (real-time)
-        ▼
-PostgreSQL Standby (Replica)    ← datalayer-2 (bare-metal)
-        │
-        │  3. Ekspor ke Parquet lokal lalu upload (Jam-an)
-        ▼
-Amazon S3 (Data Lake)
-        │
-        │  4. Baca data Parquet via s3a:// (Jam-an)
-        ▼
-Apache Spark (Local Mode [*])   ← applayer-1 (Master, diorkestrasikan oleh Systemd Timer)
-        │
-        │  5. Tulis hasil agregasi & anomali (distributed JDBC write)
-        ▼
-PostgreSQL + TimescaleDB (Primary) ← datalayer-1
-        │
-        └────────────────────────────────────────┐
-                                                 │ 6. Query data analitik
-                                                 ▼
-Grafana Dashboard               ← applayer-1 (Container)
-                                                 ▲
-                                                 │ 7. Query metrik server
-                                                 ▼
-Prometheus Server (Push Model)  ← applayer-1 (Container)
-        ▲
-        │  8. remote_write (Metrik Host & DB)
-        │
-Grafana Alloy (Host Agent)      ← Terinstall di semua node (applayer-1, datalayer-1, datalayer-2)
+
+### 2. Alur Monitoring & Dashboard Visualisasi
+
+```text
+ ┌──────────────────────────────────────────────────────────────┐
+ │                  Grafana Alloy Host Agent                    │
+ │  (Terinstall di: applayer-1, datalayer-1, & datalayer-2)     │
+ └──────────────────────────────┬───────────────────────────────┘
+                                │
+                                │ 8. Push Metrics (remote_write)
+                                ▼
+ ┌──────────────────────────────────────────────────────────────┐
+ │                Prometheus Server (applayer-1)                │
+ └──────────────────────────────┬───────────────────────────────┘
+                                │
+                                │ 7. Query Metrics
+                                ▼
+ ┌──────────────────────────────────────────────────────────────┐
+ │                  Grafana Dashboard (applayer-1)              │
+ └──────────────────────────────▲───────────────────────────────┘
+                                │
+                                │ 6. Query Analytics & Raw Data
+                                │
+ ┌──────────────────────────────┴───────────────────────────────┐
+ │               TimescaleDB Primary (datalayer-1)              │
+ └──────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Infrastruktur Cloud
 
-```
+```text
 AWS ap-southeast-1 (Singapore)
 └── VPC: 10.0.0.0/16
     └── Public Subnet: 10.0.1.0/24
         ├── iot-bigdata-applayer-1 — c7i-flex.large (always-on)
-        │   ├── FastAPI Backend
-        │   ├── Mosquitto MQTT
+        │   ├── FastAPI Backend & MQTT consumer
+        │   ├── Mosquitto MQTT broker (Port TLS 8883)
         │   ├── Grafana + Telegram Alerting
-        │   ├── Spark Master
-        │   ├── Cloudflare Tunnel → grafana.cheshub.my.id
+        │   ├── Prometheus Server
+        │   ├── Grafana Alloy agent
+        │   ├── Spark Master (Local execution engine)
+        │   ├── Cloudflare Tunnel → grafana.chescloud.my.id
         │   └── Tailscale
         │
         ├── iot-bigdata-datalayer-1 — t3.small (always-on)
         │   ├── PostgreSQL PRIMARY (TimescaleDB, bare-metal)
+        │   ├── Grafana Alloy agent (dengan Postgres exporter)
         │   └── Tailscale
         │
         ├── iot-bigdata-datalayer-2 — t3.small (always-on)
-        │   ├── PostgreSQL STANDBY (streaming replication)
+        │   ├── PostgreSQL STANDBY (streaming replication, read-only)
+        │   ├── Grafana Alloy agent (dengan Postgres exporter)
         │   └── Tailscale
         │
-        └── Worker Nodes — t3.small (ephemeral, otomatis via script)
-            └── Spark Worker
+        └── Worker Nodes — t3.small (ephemeral, opsional untuk scaling masif di masa depan)
+            └── Spark Worker (Saat ini dinonaktifkan untuk menghemat biaya & overhead)
 
 Akses:
-├── User    → Cloudflare Tunnel → grafana.cheshub.my.id
+├── User    → Cloudflare Tunnel → grafana.chescloud.my.id
 ├── Admin   → Tailscale SSH (zero inbound port dari internet)
 ├── DB sync → internal VPC only (10.0.1.x)
 └── S3      → via IAM Role (no hardcoded credentials)
@@ -105,30 +137,35 @@ Akses:
 
 ## Tech Stack
 
-| Layer          | Teknologi                              |
-|----------------|----------------------------------------|
-| Ingestion      | FastAPI, Paho MQTT                     |
-| Message Broker | Eclipse Mosquitto                      |
-| Database       | PostgreSQL 16 + TimescaleDB            |
-| Replikasi DB   | PostgreSQL Streaming Replication       |
-| Data Lake      | Amazon S3 (format Parquet, s3a://)     |
-| Processing     | Apache Spark 3.5.8 (PySpark)           |
-| Visualisasi    | Grafana + Telegram Alerting            |
-| Infra lokal    | WSL, Docker, Docker Compose            |
-| Infra cloud    | AWS EC2, VPC, S3, IAM                  |
-| Akses & Tunnel | Cloudflare Tunnel, Tailscale           |
-| Automasi       | Bash + AWS CLI                         |
-| Bahasa         | Python 3.12                            |
+| Layer          | Teknologi                              | Keterangan |
+|----------------|----------------------------------------|------------|
+| Ingestion      | FastAPI, Paho MQTT                     | API ingest data & broker consumer |
+| Message Broker | Eclipse Mosquitto                      | MQTT broker dengan TLS port 8883 |
+| Database       | PostgreSQL 16 + TimescaleDB            | Penyimpanan data time-series ter-hypertable |
+| Replikasi DB   | PostgreSQL Streaming Replication       | Sinkronisasi primary-standby secara real-time |
+| Data Lake      | Amazon S3 (format Parquet, s3a://)     | Penyimpanan data batch terkompresi |
+| Processing     | Apache Spark 3.5.8 (PySpark)           | Mesin analisis agregasi & anomali |
+| Monitoring     | Prometheus Server & Grafana Alloy      | Pengumpul & penyimpan metrik host + database |
+| Visualisasi    | Grafana + Telegram Alerting            | Dashboard server & data analitik |
+| Infra lokal    | WSL, Docker, Docker Compose            | Development environment |
+| Infra cloud    | AWS EC2, VPC, S3, IAM                  | Cloud infrastructure |
+| Akses & Tunnel | Cloudflare Tunnel, Tailscale           | Secure tunnel & VPN admin |
+| Automasi       | Bash, AWS CLI, Systemd Timer           | Script provisioning & orkestrator pipeline |
+| Bahasa         | Python 3.12                            | Backend & PySpark scripting |
 
 ---
 
 ## Sensor yang Dimonitor
 
-| Sensor                | Field                                         |
-|-----------------------|-----------------------------------------------|
-| Suhu & Kelembaban     | `temperature` (°C), `humidity` (%RH)          |
-| Accelerometer/Getaran | `accel_x/y/z` (m/s²), `vibration_rms` (m/s²) |
-| Uap Gas (MQ-135)      | `flux_ppm` (ppm), `flux_aqi`, `voc_level`     |
+| Sensor | Field | Tipe Data | Keterangan / Rentang Nilai |
+|---|---|---|---|
+| Suhu (DHT22) | `temperature` | Float | Suhu ruangan dalam Celsius (°C) [-10.0 s/d 100.0] |
+| Kelembaban (DHT22) | `humidity` | Float | Kelembaban relatif dalam %RH [0.0 s/d 100.0] |
+| Accelerometer (MPU6050) | `accel_x`, `accel_y`, `accel_z` | Float | Percepatan gerak sudut per axis (m/s²) |
+| Getaran (MPU6050) | `vibration_rms` | Float | Nilai RMS getaran fisik (m/s²) [>= 0] |
+| Uap Gas (MQ-135) | `flux_ppm` | Float | Kadar uap gas terdeteksi (ppm) [>= 0] |
+| Kualitas Udara (MQ-135) | `flux_aqi` | Integer | Indeks kualitas udara (AQI) [0 s/d 500] |
+| Kategori VOC (MQ-135) | `voc_level` | String | Kategori tingkat gas: `GOOD`, `MODERATE`, `UNHEALTHY`, `HAZARDOUS` |
 
 ---
 
@@ -207,43 +244,57 @@ Pada arsitektur sebelumnya (DB primary di app node), benchmark dengan 36.057 rec
 
 ## Struktur Folder
 
-```
+```text
 iot-bigdata-project/
-├── backend/              # FastAPI app + MQTT consumer
+├── backend/                    # FastAPI app + MQTT consumer
 │   └── app/
-│       ├── main.py       # Entry point, startup/shutdown
-│       ├── db.py         # Connection pool ke TimescaleDB
-│       ├── models/       # Pydantic schema (validasi payload)
-│       ├── routes/       # HTTP endpoint
-│       └── mqtt/         # MQTT consumer (subscribe & proses pesan)
-├── simulator/            # Script simulasi device IoT
-├── spark-jobs/           # PySpark batch analytics
-│   ├── export_to_parquet.py    # Export DB → Parquet → S3
-│   ├── batch_analytics.py      # Spark job: S3 → analytics → DB
+│       ├── main.py             # Entry point, startup/shutdown
+│       ├── db.py               # Connection pool ke TimescaleDB
+│       ├── models/             # Pydantic schema (validasi payload)
+│       ├── routes/             # HTTP endpoint
+│       └── mqtt/               # MQTT consumer (subscribe & proses pesan)
+├── simulator/                  # Script simulasi device IoT
+├── spark-jobs/                 # PySpark batch analytics
+│   ├── export_to_parquet.py    # Export DB Standby → Parquet → S3
+│   ├── batch_analytics.py      # Spark job: S3 → analytics → DB Primary
+│   ├── run_hourly_pipeline.sh  # Orkestrator utama pipeline jam-an
 │   ├── generate_bulk_data.py   # Generate synthetic dataset untuk benchmark
-│   ├── run_with_worker.sh      # Automasi ephemeral worker
+│   ├── run_with_worker.sh      # Automasi ephemeral worker (opsional)
 │   └── data/parquet/           # Temporary Parquet (tidak di-commit)
-├── benchmarks/           # Suite benchmark (ingestion, health, idempotency)
+├── benchmarks/                 # Suite benchmark (ingestion, health, idempotency)
+│   ├── run_comparison.sh       # Script pembanding benchmark dinamis
+│   └── compare_results.py      # Visualisasi laporan perbandingan benchmark
 ├── db/
-│   └── init.sql          # Schema TimescaleDB (tabel + hypertable + retention)
+│   └── init.sql                # Schema TimescaleDB (tabel + hypertable + retention)
 ├── infra/
-│   ├── docker-compose.yml      # Mosquitto + Grafana di applayer-1
+│   ├── docker-compose.yml      # Mosquitto + Grafana + Prometheus di applayer-1
 │   ├── .env.example
 │   ├── generate_mqtt_passwd.sh # Helper generate Mosquitto password
 │   ├── scripts/                # Provisioning scripts untuk DB nodes
 │   │   ├── provision-db-primary.sh
 │   │   └── provision-db-replica.sh
-│   └── mosquitto/
-│       └── mosquitto.conf
+│   ├── mosquitto/
+│   │   └── mosquitto.conf
+│   ├── prometheus/             # Konfigurasi Prometheus Server
+│   │   └── prometheus.yml
+│   ├── alloy/                  # Konfigurasi Grafana Alloy push-agent
+│   │   └── config.alloy
+│   └── systemd/                # Berkas unit systemd untuk cloud deployment
+│       ├── certbot-renew.service
+│       ├── certbot-renew.timer
+│       ├── iot-backend.service
+│       ├── iot-analytics.service
+│       └── iot-analytics.timer
 ├── grafana/
 │   └── provisioning/
-│       ├── datasources/        # TimescaleDB datasource (env-based config)
-│       ├── dashboards/         # Dashboard IoT monitoring
-│       └── alerting/           # Alert rules + contact points (Telegram)
+│       ├── datasources/        # TimescaleDB & Prometheus datasource (env-based)
+│       ├── dashboards/         # Dashboard IoT monitoring & Server monitor
+│       └── alerting/           # Alert rules + contact points (Telegram Alerting)
 ├── docs/
-│   ├── ARCH-001-refactor-infra-topology.md   # Ticket arsitektur
-│   ├── runbook-db-setup.md                   # Setup PostgreSQL + TimescaleDB
-│   └── runbook-spark-setup.md                # Setup Spark + benchmarking
+│   ├── ARCH-001-refactor-infra-topology.md   # Dokumen arsitektur topologi DB terpisah
+│   ├── aws-infrastructure.md                 # Konfigurasi VPC, SG, IAM AWS
+│   ├── runbook-db-setup.md                   # Setup PostgreSQL + TimescaleDB + Replication
+│   └── runbook-spark-setup.md                # Setup Spark + benchmarking & systemd automation
 └── README.md
 ```
 

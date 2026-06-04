@@ -195,7 +195,7 @@ Attached to: `applayer-1`, dan dipakai sebagai instance profile ke ephemeral wor
 | Service | Purpose | Note |
 |---------|---------|------|
 | **Tailscale** | Zero-trust SSH ke semua node | Tidak ada inbound port 22 dari internet |
-| **Cloudflare Tunnel** | User access Grafana di `grafana.cheshub.my.id` | Tidak ada inbound port 3000 dari internet |
+| **Cloudflare Tunnel** | User access Grafana di `grafana.chescloud.my.id` | Tidak ada inbound port 3000 dari internet |
 | **Telegram Bot** | Alerting dari Grafana | Bot token + chat ID di `contact-points.yaml` (gitignored) |
 
 ---
