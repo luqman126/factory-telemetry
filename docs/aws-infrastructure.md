@@ -225,12 +225,12 @@ Untuk infrastruktur always-on di `ap-southeast-1`:
 
 | Resource | Qty | Hourly | Monthly |
 |----------|-----|--------|---------|
-| `c7i-flex.large` (applayer-1) | 1 | ~$0.078 | ~$57 |
-| `t3.small` (datalayer x2) | 2 | ~$0.024 | ~$36 |
-| EBS gp3 (30GB × 3) | 90GB | — | ~$7 |
+| `c7i-flex.large` (applayer-1) | 1 | ~$0.098 | ~$71.38 |
+| `t3.small` (datalayer x2) | 2 | ~$0.026 | ~$38.54 |
+| EBS gp3 (30GB × 3) | 90GB | — | ~$7.20 |
 | S3 storage | <1GB | — | ~$0.02 |
 | Data transfer | varies | — | varies |
-| **Total estimate** | | | **~$100/month** |
+| **Total estimate** | | | **~$117.14/month** |
 
-> Ephemeral worker cost negligible (jalan beberapa menit per job, $0.024/jam × jumlah job × durasi).
+> Ephemeral worker cost negligible (jalan beberapa menit per job, $0.0264/jam × jumlah job × durasi).
 > Untuk estimasi akurat, gunakan [AWS Pricing Calculator](https://calculator.aws/).
