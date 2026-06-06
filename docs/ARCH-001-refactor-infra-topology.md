@@ -248,3 +248,30 @@ Jika migrasi gagal di phase manapun:
 3. SSH applayer-1   → Setup .env (POSTGRES_HOST=<datalayer-1_ip>), docker compose up -d
 4. Validate         → Grafana connects, backend writes, replication active
 ```
+
+---
+
+## Post-ARCH-001: Private Subnet Migration
+
+Setelah ARCH-001 selesai, dilakukan optimasi keamanan lanjutan: **memindahkan database nodes dan Spark Worker ke private subnet** (`10.0.2.0/24`).
+
+### Perubahan dari ARCH-001
+
+| Aspek | ARCH-001 (Awal) | Post-ARCH-001 (Saat ini) |
+|-------|-----------------|--------------------------|
+| Subnet DB | Public (`10.0.1.0/24`) | Private (`10.0.2.0/24`) |
+| IP datalayer-1 | `10.0.1.247` | `10.0.2.10` |
+| IP datalayer-2 | `10.0.1.78` | `10.0.2.20` |
+| Akses SSH ke DB | Tailscale langsung | Bastion via applayer-1 (`ssh -A`) |
+| Tailscale di DB | Aktif | Dinonaktifkan |
+| S3 dari Worker | Via internet publik | Via VPC Gateway Endpoint (gratis) |
+| Biaya tambahan | — | $0 (tanpa NAT Gateway) |
+
+### Motivasi
+
+- Database tidak memiliki alasan untuk berada di public subnet — hanya berkomunikasi dengan applayer-1 dan antar database nodes.
+- Mengurangi *attack surface* dengan menghilangkan eksposur jaringan publik dari komponen stateful.
+- VPC Gateway Endpoint untuk S3 menghilangkan kebutuhan NAT Gateway yang mahal (~$43/bulan).
+
+Lihat `docs/aws-infrastructure.md` untuk detail konfigurasi subnet, route table, dan VPC Endpoint.
+

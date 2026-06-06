@@ -7,12 +7,12 @@
 ## Topology
 
 ```
-iot-bigdata-applayer-1 (App Layer)
+iot-bigdata-applayer-1 (App Layer, Public Subnet)
     │
-    │  TCP 5432
+    │  TCP 5432 (internal VPC)
     ▼
 iot-bigdata-datalayer-1 (DB Primary)  ───── streaming replication ─────►  iot-bigdata-datalayer-2 (DB Replica)
-    10.0.1.247                                                                     10.0.1.78
+    10.0.2.10 (Private Subnet)                                                      10.0.2.20 (Private Subnet)
 ```
 
 **Naming convention:** `iot-bigdata-{layer}-{index}` (disiapkan untuk horizontal scaling).
@@ -29,8 +29,9 @@ iot-bigdata-datalayer-1 (DB Primary)  ───── streaming replication ─�
 
 ### Prerequisites
 
-- Amazon Linux 2023 (EC2 t3.small)
-- Security Group: inbound TCP 5432 dari `10.0.1.0/24`
+- Amazon Linux 2023 (EC2 t3.small, di private subnet `10.0.2.0/24`)
+- Security Group: inbound TCP 5432 dari `applayer-sg` dan `10.0.2.0/24`, inbound TCP 22 dari `applayer-sg`
+- Akses SSH via applayer-1 (Bastion Host)
 
 ### 1. Install PostgreSQL 16
 
@@ -92,10 +93,16 @@ EOF'
 ```bash
 sudo bash -c 'cat >> /var/lib/pgsql/data/pg_hba.conf <<EOF
 
-# App + services
+# App + services (dari applayer-1 di public subnet)
 host    all             <db_user>        10.0.1.0/24       scram-sha-256
 
-# Replication from datalayer-2
+# App + services (dari private subnet — Spark Worker, Grafana Alloy)
+host    all             <db_user>        10.0.2.0/24       scram-sha-256
+
+# Localhost (untuk Grafana Alloy Postgres exporter)
+host    all             <db_user>        127.0.0.1/32      scram-sha-256
+
+# Replication from datalayer-2 (private subnet)
 host    replication     replicator       <datalayer-2_ip>/32   scram-sha-256
 EOF'
 ```
@@ -115,7 +122,10 @@ CREATE USER <db_user> WITH PASSWORD '<db_password>';
 CREATE DATABASE <db_name> OWNER <db_user>;
 GRANT ALL PRIVILEGES ON DATABASE <db_name> TO <db_user>;
 CREATE USER replicator WITH REPLICATION PASSWORD '<db_password>';
-SELECT pg_create_physical_replication_slot('node3_replica_slot');
+SELECT pg_create_physical_replication_slot('replica_datalayer2_slot');
+
+-- Grant monitoring permissions (untuk Grafana Alloy Postgres exporter)
+GRANT pg_monitor TO <db_user>;
 EOF
 ```
 
@@ -154,9 +164,10 @@ sudo -u postgres psql -c "SHOW wal_level;"
 
 ### Prerequisites
 
-- Amazon Linux 2023 (EC2 t3.small, same spec as datalayer-1)
-- Security Group: inbound TCP 5432 dari `10.0.1.0/24`
+- Amazon Linux 2023 (EC2 t3.small, di private subnet `10.0.2.0/24`, same spec as datalayer-1)
+- Security Group: inbound TCP 5432 dari `applayer-sg` dan `10.0.2.0/24`, inbound TCP 22 dari `applayer-sg`
 - datalayer-1 (primary) sudah running dan replication slot sudah dibuat
+- Akses SSH via applayer-1 (Bastion Host)
 
 ### 1. Install PostgreSQL 16
 
@@ -200,7 +211,7 @@ sudo PGPASSWORD='<db_password>' pg_basebackup \
     -U replicator \
     -D /var/lib/pgsql/data \
     -Fp -Xs -P -R \
-    -S node3_replica_slot
+    -S replica_datalayer2_slot
 
 sudo chown -R postgres:postgres /var/lib/pgsql/data
 sudo chmod 700 /var/lib/pgsql/data
@@ -215,7 +226,7 @@ sudo bash -c 'cat >> /var/lib/pgsql/data/postgresql.conf <<EOF
 
 # --- Replica settings ---
 hot_standby = on
-primary_slot_name = '"'"'node3_replica_slot'"'"'
+primary_slot_name = '"'"'replica_datalayer2_slot'"'"'
 EOF'
 ```
 
@@ -285,8 +296,11 @@ nc -zv <datalayer-2_ip> 5432 -w 5
 PostgreSQL replication hanya menyalin data, **bukan file konfigurasi**. Apply fix yang sama seperti di primary:
 
 ```bash
-# SSH ke datalayer-2
-sudo grep "10.0.1" /var/lib/pgsql/data/pg_hba.conf
+# SSH ke datalayer-2 via Bastion (applayer-1)
+ssh -A ec2-user@<applayer-1-tailscale-ip>
+ssh ec2-user@10.0.2.20
+
+sudo grep "10.0" /var/lib/pgsql/data/pg_hba.conf
 
 # Kalau masih ada literal <db_user>:
 sudo sed -i 's/<db_user>/<actual_username>/' /var/lib/pgsql/data/pg_hba.conf
@@ -296,8 +310,8 @@ sudo -u postgres psql -c "SELECT pg_reload_conf();"
 **3. Update `infra/.env` di applayer-1:**
 
 ```
-POSTGRES_HOST=<datalayer-1_ip>          # primary, untuk write + alert
-POSTGRES_HOST_REPLICA=<datalayer-2_ip>  # replica, untuk dashboard + export
+POSTGRES_HOST=10.0.2.10           # primary (private subnet)
+POSTGRES_HOST_REPLICA=10.0.2.20   # replica (private subnet)
 ```
 
 **4. Recreate Grafana container** (env baru tidak ke-load oleh `restart` biasa):
@@ -325,7 +339,10 @@ FROM pg_stat_activity
 WHERE state IS NOT NULL AND client_addr IS NOT NULL;"
 ```
 
-Harus ada koneksi dari applayer (`10.0.1.127`) yang query `sensor_readings`.
+Harus ada koneksi dari applayer (`10.0.1.x`) yang query `sensor_readings`.
+
+> **Note:** Akses SSH ke database nodes dilakukan via applayer-1 (Bastion Host) menggunakan SSH Agent Forwarding (`ssh -A`).
+> Database nodes berada di private subnet tanpa Tailscale.
 
 ### Trade-off
 

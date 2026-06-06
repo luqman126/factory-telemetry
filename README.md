@@ -102,35 +102,34 @@ Project ini sekaligus menjadi eksperimen distributed computing dengan membanding
 ```text
 AWS ap-southeast-1 (Singapore)
 └── VPC: 10.0.0.0/16
-    └── Public Subnet: 10.0.1.0/24
-        ├── iot-bigdata-applayer-1 — c7i-flex.large (always-on)
-        │   ├── FastAPI Backend & MQTT consumer
-        │   ├── Mosquitto MQTT broker (Port TLS 8883)
-        │   ├── Grafana + Telegram Alerting
-        │   ├── Prometheus Server
-        │   ├── Grafana Alloy agent
-        │   ├── Spark Master (Local execution engine)
-        │   ├── Cloudflare Tunnel → grafana.chescloud.my.id
-        │   └── Tailscale
-        │
+    ├── Public Subnet: 10.0.1.0/24
+    │   └── iot-bigdata-applayer-1 — c7i-flex.large (always-on)
+    │       ├── FastAPI Backend & MQTT consumer
+    │       ├── Mosquitto MQTT broker (Port TLS 8883)
+    │       ├── Grafana + Telegram Alerting
+    │       ├── Prometheus Server
+    │       ├── Grafana Alloy agent
+    │       ├── Spark Master (Local execution engine)
+    │       ├── Cloudflare Tunnel → grafana.chescloud.my.id
+    │       └── Tailscale (Bastion Host / SSH entry point)
+    │
+    └── Private Subnet: 10.0.2.0/24 (tanpa akses internet)
         ├── iot-bigdata-datalayer-1 — t3.small (always-on)
         │   ├── PostgreSQL PRIMARY (TimescaleDB, bare-metal)
-        │   ├── Grafana Alloy agent (dengan Postgres exporter)
-        │   └── Tailscale
+        │   └── Grafana Alloy agent (dengan Postgres exporter)
         │
         ├── iot-bigdata-datalayer-2 — t3.small (always-on)
         │   ├── PostgreSQL STANDBY (streaming replication, read-only)
-        │   ├── Grafana Alloy agent (dengan Postgres exporter)
-        │   └── Tailscale
+        │   └── Grafana Alloy agent (dengan Postgres exporter)
         │
-        └── Worker Nodes — t3.small (ephemeral, opsional untuk scaling masif di masa depan)
-            └── Spark Worker (Saat ini dinonaktifkan untuk menghemat biaya & overhead)
+        └── Worker Nodes — t3.small (ephemeral)
+            └── Spark Worker (Auto launch/terminate via run_with_worker.sh)
 
 Akses:
 ├── User    → Cloudflare Tunnel → grafana.chescloud.my.id
-├── Admin   → Tailscale SSH (zero inbound port dari internet)
-├── DB sync → internal VPC only (10.0.1.x)
-└── S3      → via IAM Role (no hardcoded credentials)
+├── Admin   → Tailscale SSH → applayer-1 (Bastion) → jump ke 10.0.2.x
+├── DB sync → internal VPC only (10.0.2.x)
+└── S3      → VPC Gateway Endpoint (gratis, tanpa internet)
 ```
 
 ---
@@ -148,8 +147,8 @@ Akses:
 | Monitoring     | Prometheus Server & Grafana Alloy      | Pengumpul & penyimpan metrik host + database |
 | Visualisasi    | Grafana + Telegram Alerting            | Dashboard server & data analitik |
 | Infra lokal    | WSL, Docker, Docker Compose            | Development environment |
-| Infra cloud    | AWS EC2, VPC, S3, IAM                  | Cloud infrastructure |
-| Akses & Tunnel | Cloudflare Tunnel, Tailscale           | Secure tunnel & VPN admin |
+| Infra cloud    | AWS EC2, VPC, S3, IAM, VPC Endpoint  | Cloud infrastructure |
+| Akses & Tunnel | Cloudflare Tunnel, Tailscale           | Secure tunnel & VPN admin (Bastion) |
 | Automasi       | Bash, AWS CLI, Systemd Timer           | Script provisioning & orkestrator pipeline |
 | Bahasa         | Python 3.12                            | Backend & PySpark scripting |
 
@@ -387,6 +386,7 @@ python simulator.py
 | 8     | Refactor topology: separate DB layer (ARCH-001) | ✅ Selesai  |
 | 9     | Failover simulation (manual primary failover)   | ✅ Selesai  |
 | 10    | Automasi Pipeline Jam-an & Setup Monitoring     | ✅ Selesai  |
+| 11    | Security hardening: private subnet + VPC Endpoint | ✅ Selesai  |
 
 ---
 
@@ -398,8 +398,9 @@ python simulator.py
 - `db/init.sql` di datalayer-1 dijalankan sekali via provisioning script. Lihat `docs/runbook-db-setup.md`.
 - `spark-jobs/data/` tidak di-commit ke git.
 - Spark job dari applayer-1 selalu write ke DB Primary (datalayer-1), standby PostgreSQL bersifat read-only.
-- S3 access menggunakan IAM Role, tidak ada credentials yang disimpan di kode.
-- Worker node bersifat ephemeral — di-launch otomatis saat job, di-terminate setelah selesai. (Opsional untuk scaling data masif di masa depan. Default saat ini menggunakan mode `local[*]` jam-an di applayer-1).
+- S3 access menggunakan IAM Role, tidak ada credentials yang disimpan di kode. Spark Worker di private subnet mengakses S3 melalui VPC Gateway Endpoint (gratis).
+- Worker node bersifat ephemeral — di-launch otomatis di private subnet saat job, di-terminate setelah selesai. (Opsional untuk scaling data masif di masa depan. Default saat ini menggunakan mode `local[*]` jam-an di applayer-1).
 - Custom AMI worker (Amazon Linux 2023 + Java 21 + Spark 3.5.8).
+- Database nodes berada di private subnet (`10.0.2.0/24`) tanpa akses internet. Akses SSH melalui applayer-1 sebagai Bastion Host.
 - Detail dokumentasi setup di `docs/runbook-db-setup.md` dan `docs/runbook-spark-setup.md`.
-- Detail konfigurasi infrastruktur AWS (VPC, SG, IAM) di `docs/aws-infrastructure.md`.
+- Detail konfigurasi infrastruktur AWS (VPC, SG, IAM, VPC Endpoint) di `docs/aws-infrastructure.md`.

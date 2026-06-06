@@ -357,7 +357,7 @@ Tiga kemungkinan penyebab — diagnose via Master Web UI (port 8080):
 --conf spark.driver.bindAddress=<vpc_ip>
 ```
 
-`run_with_worker.sh` sudah auto-detect VPC IP `10.0.1.x` dari interface.
+`run_with_worker.sh` sudah auto-detect VPC IP dari interface.
 
 #### `--master local[*]` di spark-submit tidak diterapkan
 
@@ -395,14 +395,11 @@ ssh ec2-user@<worker_ip> "aws s3 ls s3://<bucket>/ --region ap-southeast-1"
 
 **Penyebab:** Worker subnet tidak auto-assign public IP, dan tidak ada NAT Gateway/VPC Endpoint untuk S3.
 
-**Solusi (pilih salah satu):**
+**Solusi (diimplementasikan):**
 
-1. Enable subnet auto-assign public IP:
-   ```bash
-   aws ec2 modify-subnet-attribute --subnet-id <subnet_id> --map-public-ip-on-launch
-   ```
-2. Launch worker dengan `--network-interfaces "AssociatePublicIpAddress=true,..."` (sudah dipakai di `run_with_worker.sh`).
-3. Buat VPC Endpoint untuk S3 (gateway endpoint, gratis, tidak butuh public IP).
+VPC Gateway Endpoint untuk S3 (gateway endpoint, gratis) sudah dikonfigurasi dan di-associate ke route table private subnet. Worker di private subnet mengakses S3 melalui endpoint ini tanpa perlu public IP atau NAT Gateway.
+
+> **Catatan historis:** Sebelum implementasi VPC Endpoint, solusi sementara yang dipakai adalah launch worker dengan `--network-interfaces "AssociatePublicIpAddress=true,..."`. Solusi ini sudah tidak diperlukan lagi.
 
 #### Worker stuck karena IMDSv2 incompatibility
 
@@ -641,18 +638,18 @@ LIMIT 10;
 ## Topology
 
 ```
-applayer-1 (10.0.1.127)
+applayer-1 (10.0.1.x, Public Subnet)
 ├── Spark Master (port 7077, UI 8080)
 ├── Spark Driver (saat spark-submit)
 └── PySpark venv
 
-ephemeral worker (10.0.1.x)
+ephemeral worker (10.0.2.x, Private Subnet)
 ├── Spark Worker
-└── Executor → JDBC write ke datalayer-1
+└── Executor → JDBC write ke datalayer-1, S3 via VPC Endpoint
 
-datalayer-1 (10.0.1.247)
+datalayer-1 (10.0.2.10, Private Subnet)
 └── PostgreSQL Primary
 
-S3 (Data Lake)
+S3 (Data Lake, via VPC Gateway Endpoint)
 └── Parquet files dibaca oleh Spark
 ```

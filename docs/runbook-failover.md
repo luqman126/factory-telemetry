@@ -28,18 +28,22 @@ Sebelum mulai failover, pastikan:
 
 - [ ] Catat IP node:
   ```
-  datalayer-1: 10.0.1.247  (current primary)
-  datalayer-2: 10.0.1.78   (current replica)
-  applayer-1:  10.0.1.127
+  datalayer-1: 10.0.2.10   (current primary, private subnet)
+  datalayer-2: 10.0.2.20   (current replica, private subnet)
+  applayer-1:  10.0.1.x    (public subnet, Bastion Host)
   ```
 
 ### Akses ke Node
 
-Semua command yang prefix-nya **"Di <node>"** asumsinya operator sudah SSH ke node tersebut via Tailscale dari local machine:
+Semua command yang prefix-nya **"Di <node>"** asumsinya operator sudah SSH ke node tersebut. Untuk database nodes di private subnet, akses via applayer-1 sebagai Bastion Host:
 
 ```bash
-# Dari local machine
-ssh <tailscale-name-or-ip>
+# Dari local machine → applayer-1 (via Tailscale)
+ssh -A ec2-user@<applayer-1-tailscale-ip>
+
+# Dari applayer-1 → database node (via private IP)
+ssh ec2-user@10.0.2.10   # datalayer-1
+ssh ec2-user@10.0.2.20   # datalayer-2
 ```
 
 ### Naming Convention untuk Replication Slot
@@ -75,7 +79,7 @@ sudo systemctl status iot-backend
 sudo journalctl -u iot-backend -n 30 --no-pager
 ```
 
-Backend gagal insert sensor data — error connection refused atau timeout ke `10.0.1.247:5432`.
+Backend gagal insert sensor data — error connection refused atau timeout ke `10.0.2.10:5432`.
 
 **Grafana dashboard** (buka di browser via Cloudflare Tunnel):
 - Dashboard panel **masih jalan** karena baca dari replica (datalayer-2). ✓
@@ -149,11 +153,11 @@ cd ~/iot-bigdata-project/infra
 # Backup .env saat ini
 cp .env .env.bak
 
-# Update POSTGRES_HOST → datalayer-2 IP
-sed -i 's/^POSTGRES_HOST=.*/POSTGRES_HOST=10.0.1.78/' .env
+# Update POSTGRES_HOST → datalayer-2 IP (private subnet)
+sed -i 's/^POSTGRES_HOST=.*/POSTGRES_HOST=10.0.2.20/' .env
 
 # Update POSTGRES_HOST_REPLICA juga ke datalayer-2 (sementara, sampai rebuild replica baru)
-sed -i 's/^POSTGRES_HOST_REPLICA=.*/POSTGRES_HOST_REPLICA=10.0.1.78/' .env
+sed -i 's/^POSTGRES_HOST_REPLICA=.*/POSTGRES_HOST_REPLICA=10.0.2.20/' .env
 
 # Verify
 grep POSTGRES_HOST .env
@@ -228,7 +232,7 @@ SELECT pg_create_physical_replication_slot('replica_datalayer1_slot');
 sudo bash -c 'cat >> /var/lib/pgsql/data/pg_hba.conf <<EOF
 
 # Replication from datalayer-1 (rebuilt as replica)
-host    replication     replicator       10.0.1.247/32     scram-sha-256
+host    replication     replicator       10.0.2.10/32     scram-sha-256
 EOF'
 
 sudo -u postgres psql -c "SELECT pg_reload_conf();"
@@ -245,7 +249,7 @@ sudo rm -rf /var/lib/pgsql/data
 
 # Base backup dari primary baru (datalayer-2)
 sudo PGPASSWORD='<db_password>' pg_basebackup \
-    -h 10.0.1.78 \
+    -h 10.0.2.20 \
     -U replicator \
     -D /var/lib/pgsql/data \
     -Fp -Xs -P -R \
@@ -277,7 +281,7 @@ sudo -u postgres psql -c "SELECT pg_is_in_recovery();"
 **Di datalayer-2 (current primary):**
 ```bash
 sudo -u postgres psql -c "SELECT client_addr, state FROM pg_stat_replication;"
-# Expected: 1 row dengan client_addr = 10.0.1.247, state = 'streaming'
+# Expected: 1 row dengan client_addr = 10.0.2.10, state = 'streaming'
 
 sudo -u postgres psql -c "SELECT slot_name, active FROM pg_replication_slots;"
 # Expected: replica_datalayer1_slot | t
@@ -288,7 +292,7 @@ sudo -u postgres psql -c "SELECT slot_name, active FROM pg_replication_slots;"
 ```bash
 cd ~/iot-bigdata-project/infra
 # Update POSTGRES_HOST_REPLICA point ke datalayer-1 (sekarang replica)
-sed -i 's/^POSTGRES_HOST_REPLICA=.*/POSTGRES_HOST_REPLICA=10.0.1.247/' .env
+sed -i 's/^POSTGRES_HOST_REPLICA=.*/POSTGRES_HOST_REPLICA=10.0.2.10/' .env
 docker compose up -d --force-recreate grafana
 ```
 
@@ -321,8 +325,8 @@ sudo -u postgres psql -c "SELECT pg_is_in_recovery();"  # harus 'f'
 
 ```bash
 cd ~/iot-bigdata-project/infra
-sed -i 's/^POSTGRES_HOST=.*/POSTGRES_HOST=10.0.1.247/' .env
-sed -i 's/^POSTGRES_HOST_REPLICA=.*/POSTGRES_HOST_REPLICA=10.0.1.247/' .env  # sementara, belum ada replica
+sed -i 's/^POSTGRES_HOST=.*/POSTGRES_HOST=10.0.2.10/' .env
+sed -i 's/^POSTGRES_HOST_REPLICA=.*/POSTGRES_HOST_REPLICA=10.0.2.10/' .env  # sementara, belum ada replica
 
 docker compose up -d --force-recreate grafana
 sudo systemctl restart iot-backend
@@ -346,9 +350,9 @@ sudo -u postgres psql -c "
 SELECT pg_create_physical_replication_slot('replica_datalayer2_slot');
 "
 
-# pg_hba.conf sudah ada entry untuk 10.0.1.78 dari setup awal, tidak perlu diubah
+# pg_hba.conf sudah ada entry untuk 10.0.2.20 dari setup awal, tidak perlu diubah
 # Kalau hilang/perlu tambah, run:
-# sudo bash -c 'echo "host replication replicator 10.0.1.78/32 scram-sha-256" >> /var/lib/pgsql/data/pg_hba.conf'
+# sudo bash -c 'echo "host replication replicator 10.0.2.20/32 scram-sha-256" >> /var/lib/pgsql/data/pg_hba.conf'
 # sudo -u postgres psql -c "SELECT pg_reload_conf();"
 ```
 
@@ -361,7 +365,7 @@ sudo rm -rf /var/lib/pgsql/data
 
 # Base backup dari primary (datalayer-1)
 sudo PGPASSWORD='<db_password>' pg_basebackup \
-    -h 10.0.1.247 \
+    -h 10.0.2.10 \
     -U replicator \
     -D /var/lib/pgsql/data \
     -Fp -Xs -P -R \
@@ -389,7 +393,7 @@ sudo systemctl start postgresql
 ```bash
 # Di applayer-1
 cd ~/iot-bigdata-project/infra
-sed -i 's/^POSTGRES_HOST_REPLICA=.*/POSTGRES_HOST_REPLICA=10.0.1.78/' .env
+sed -i 's/^POSTGRES_HOST_REPLICA=.*/POSTGRES_HOST_REPLICA=10.0.2.20/' .env
 docker compose up -d --force-recreate grafana
 ```
 
@@ -399,7 +403,7 @@ docker compose up -d --force-recreate grafana
 ```bash
 sudo -u postgres psql -c "SELECT pg_is_in_recovery();"  # harus 'f'
 sudo -u postgres psql -c "SELECT client_addr, state FROM pg_stat_replication;"
-# Expected: 1 row, client_addr = 10.0.1.78, state = 'streaming'
+# Expected: 1 row, client_addr = 10.0.2.20, state = 'streaming'
 sudo -u postgres psql -c "SELECT slot_name, active FROM pg_replication_slots;"
 # Expected: replica_datalayer2_slot | t
 ```
