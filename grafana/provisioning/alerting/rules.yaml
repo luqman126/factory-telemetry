@@ -10,7 +10,7 @@ groups:
 
       # ----------------------------------------------------------
       # Suhu tinggi — berlaku semua ruangan
-      # Critical threshold: 45°C (sesuai DATA_CONTRACT)
+      # Critical threshold: 35°C (sesuai DATA_CONTRACT)
       # ----------------------------------------------------------
       - uid: high-temperature
         title: High Temperature Detected
@@ -161,3 +161,238 @@ groups:
           description: "Rata-rata vibration_rms 1 menit terakhir melebihi 0 (terdeteksi getaran) di ruang produksi"
         labels:
           severity: critical
+
+  - orgId: 1
+    name: server-alerts
+    folder: Server
+    interval: 1m
+    rules:
+
+      # ----------------------------------------------------------
+      # CPU Usage Tinggi (> 85%) selama 5 menit
+      # ----------------------------------------------------------
+      - uid: server-high-cpu
+        title: Server High CPU Usage
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: prometheus-ds
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+              editorMode: code
+              legendFormat: "{{instance}}"
+              range: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    params: [85]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "CPU Usage Tinggi"
+          description: "Penggunaan CPU pada server {{ $labels.instance }} melebihi 85% selama 5 menit terakhir."
+        labels:
+          severity: warning
+          category: server
+
+      # ----------------------------------------------------------
+      # RAM Usage Tinggi (> 85%) selama 5 menit
+      # ----------------------------------------------------------
+      - uid: server-high-ram
+        title: Server High RAM Usage
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: prometheus-ds
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
+              editorMode: code
+              legendFormat: "{{instance}}"
+              range: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    params: [85]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "RAM Usage Tinggi"
+          description: "Penggunaan RAM pada server {{ $labels.instance }} melebihi 85% selama 5 menit terakhir."
+        labels:
+          severity: warning
+          category: server
+
+      # ----------------------------------------------------------
+      # Disk Space Rendah (< 10%) selama 5 menit
+      # ----------------------------------------------------------
+      - uid: server-low-disk
+        title: Server Disk Space Low
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: prometheus-ds
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: (node_filesystem_free_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100
+              editorMode: code
+              legendFormat: "{{instance}}"
+              range: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    params: [10]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Disk Space Rendah"
+          description: "Sisa kapasitas disk pada server {{ $labels.instance }} di mountpoint '/' kurang dari 10%."
+        labels:
+          severity: critical
+          category: server
+
+      # ----------------------------------------------------------
+      # Replikasi Database Terhambat (> 10MB)
+      # ----------------------------------------------------------
+      - uid: db-replication-lag
+        title: Database Replication Lag High
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: P40AE60E18F02DE32
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              datasource:
+                type: postgres
+                uid: P40AE60E18F02DE32
+              editorMode: code
+              format: table
+              rawSql: |
+                SELECT
+                  COALESCE((SELECT pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) FROM pg_stat_replication LIMIT 1), 0)::double precision AS lag_bytes;
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    params: [10485760] # 10MB
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Replikasi Database Terhambat"
+          description: "Replication lag antara datalayer-1 dan datalayer-2 melebihi 10MB."
+        labels:
+          severity: warning
+          category: server
+
+      # ----------------------------------------------------------
+      # Database Replica Terputus
+      # ----------------------------------------------------------
+      - uid: db-replica-disconnected
+        title: Database Replica Disconnected
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: P40AE60E18F02DE32
+            relativeTimeRange:
+              from: 150
+              to: 0
+            model:
+              datasource:
+                type: postgres
+                uid: P40AE60E18F02DE32
+              editorMode: code
+              format: table
+              rawSql: |
+                SELECT
+                  COUNT(*)::double precision AS replica_count
+                FROM pg_stat_replication;
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Database Replica Terputus"
+          description: "Tidak terdeteksi adanya active streaming replica (datalayer-2) pada datalayer-1."
+        labels:
+          severity: critical
+          category: server
