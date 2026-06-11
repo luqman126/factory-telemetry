@@ -133,7 +133,7 @@
     },
     {
       "id": 4,
-      "title": "Anomali Terdeteksi (1 jam terakhir)",
+      "title": "Anomali Terdeteksi",
       "type": "table",
       "gridPos": {
         "x": 0,
@@ -144,7 +144,7 @@
       "datasource": "TimescaleDB",
       "targets": [
         {
-          "rawSql": "SELECT event_time AS \"Waktu\", device_id AS \"Device\", location AS \"Lokasi\", sensor_type AS \"Sensor\", observed_value AS \"Nilai\", threshold_value AS \"Threshold\", severity AS \"Severity\" FROM anomaly_events WHERE event_time >= NOW() - INTERVAL '1 hour' ORDER BY event_time DESC LIMIT 50",
+          "rawSql": "SELECT event_time AS \"Waktu\", device_id AS \"Device\", location AS \"Lokasi\", sensor_type AS \"Sensor\", observed_value AS \"Nilai\", threshold_value AS \"Threshold\", severity AS \"Severity\" FROM anomaly_events WHERE $__timeFilter(event_time) ORDER BY event_time DESC LIMIT 50",
           "format": "table",
           "refId": "A"
         }
