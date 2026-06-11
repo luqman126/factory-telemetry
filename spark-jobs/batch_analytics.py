@@ -1,8 +1,8 @@
 # ============================================================
 # spark-jobs/batch_analytics.py
 # Spark batch job: baca Parquet, hitung analytics, simpan ke DB
-# Jalankan: spark-submit batch_analytics.py <path_parquet> <worker_count>
-# Contoh:   spark-submit batch_analytics.py data/parquet/sensor_xxx.parquet 0
+# Jalankan: spark-submit [options] batch_analytics.py <path_parquet> <worker_count>
+# Contoh:   spark-submit --master "local[*]" batch_analytics.py data/parquet/sensor_xxx.parquet 0
 # ============================================================
 
 import os

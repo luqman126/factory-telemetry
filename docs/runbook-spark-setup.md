@@ -606,6 +606,7 @@ Output: S3 URI dari Parquet file.
 **Baseline (local mode, no ephemeral worker):**
 ```bash
 spark-submit \
+    --master "local[*]" \
     --executor-memory 512m \
     --driver-memory 512m \
     --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261,org.postgresql:postgresql:42.7.4 \
