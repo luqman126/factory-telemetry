@@ -402,17 +402,24 @@ sudo -u postgres psql -c "SELECT pg_reload_conf();"
 
 **Solusi:** Bukan error kritis — hilang sendiri setelah data terkumpul. Tidak perlu action.
 
-#### Grafana gagal start: `receiver 'telegram-alert' does not exist`
+#### Grafana gagal start: `cannot unmarshal number into Go struct field Config.chatid` atau error parsing lainnya
 
-**Penyebab:** `contact-points.yaml` tidak di-commit (berisi credentials).
+**Penyebab:** Variabel `TELEGRAM_CHAT_ID_IOT` atau `TELEGRAM_CHAT_ID_SERVER` di `.env` salah format (misalnya menggunakan tanda minus, tanda kutip literal, atau kosong).
 
 **Solusi:**
-```bash
-cd grafana/provisioning/alerting/
-cp contact-points.yaml.example contact-points.yaml
-# Edit dengan TELEGRAM_BOT_TOKEN dan TELEGRAM_CHAT_ID
-docker compose restart grafana
-```
+1. Pastikan di `.env` nilai chat ID ditulis bersih (hanya angka positif tanpa tanda minus `-` dan tanpa tanda kutip `"` atau `'`), contoh:
+   ```env
+   TELEGRAM_CHAT_ID_IOT=6526551624
+   ```
+2. Pastikan file `contact-points.yaml` mendefinisikan field `chatid` menggunakan block scalar `|` agar tidak terkena type coercion otomatis dari parser Grafana:
+   ```yaml
+   chatid: |
+     ${TELEGRAM_CHAT_ID_IOT}
+   ```
+3. Recreate kontainer Grafana:
+   ```bash
+   docker compose down && docker compose up -d
+   ```
 
 #### Mosquitto: `passwd is not a file`
 
