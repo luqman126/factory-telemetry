@@ -390,6 +390,24 @@ python simulator.py
 
 ---
 
+## Roadmap & Future Enhancements
+
+Meskipun sistem V1 ini sudah memungkinkan untuk diterapkan di lingkungan produksi, ada beberapa *upgrade* arsitektur dan operasional yang bisa diimplementasikan ke depannya untuk mencapai standar skala *Enterprise*:
+
+1. **Infrastructure as Code (IaC) menggunakan Terraform**
+   - **Tujuan:** Mendeskripsikan spesifikasi seluruh jaringan dan *server* AWS (VPC, EC2, S3, Endpoint) ke dalam *file* `.tf`.
+   - **Keuntungan:** Memungkinkan replikasi lingkungan (*Staging* ke *Production*) dengan sekali jalan (`terraform apply`), serta menjadi *backup plan* yang sempurna (*disaster recovery*) tanpa harus menyentuh AWS Console lagi.
+
+2. **CI/CD Pipeline menggunakan GitHub Actions**
+   - **Tujuan:** Mengotomatiskan alur *deployment* jika ada perubahan fitur di repositori.
+   - **Keuntungan:** Tidak perlu lagi *login* SSH manual ke *server* hanya untuk `git pull` dan me-*restart service*. *Pipeline* akan mengeksekusinya secara aman, konsisten, dan bebas dari *human error*.
+
+3. **Real-Time Streaming Analytics (Spark Structured Streaming)**
+   - **Tujuan:** Mengevolusi Apache Spark dari pemrosesan *Batch* (setiap 1 jam) menjadi pemrosesan *Streaming* yang membaca data langsung dari *Message Broker* (seperti integrasi MQTT ke Kafka).
+   - **Keuntungan:** Menekan latensi *anomaly detection* secara drastis, dari jeda 1 jam menjadi hitungan detik (*real-time*). Sangat krusial untuk peringatan bahaya seperti terdeteksinya kadar *HAZARDOUS VOC Level*.
+
+---
+
 ## Catatan
 
 - `.env` tidak di-commit ke git. Gunakan `.env.example` sebagai acuan.
