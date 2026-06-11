@@ -186,11 +186,24 @@ groups:
               instant: true
               range: false
               refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
           - refId: C
             datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
             model:
               type: threshold
-              expression: A
+              expression: B
               conditions:
                 - evaluator:
                     params: [85]
@@ -202,6 +215,7 @@ groups:
                   reducer:
                     type: last
                   type: query
+              refId: C
         noDataState: NoData
         execErrState: Error
         for: 5m
@@ -230,11 +244,24 @@ groups:
               instant: true
               range: false
               refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
           - refId: C
             datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
             model:
               type: threshold
-              expression: A
+              expression: B
               conditions:
                 - evaluator:
                     params: [85]
@@ -246,6 +273,7 @@ groups:
                   reducer:
                     type: last
                   type: query
+              refId: C
         noDataState: NoData
         execErrState: Error
         for: 5m
@@ -274,11 +302,24 @@ groups:
               instant: true
               range: false
               refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
           - refId: C
             datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
             model:
               type: threshold
-              expression: A
+              expression: B
               conditions:
                 - evaluator:
                     params: [10]
@@ -290,6 +331,7 @@ groups:
                   reducer:
                     type: last
                   type: query
+              refId: C
         noDataState: NoData
         execErrState: Error
         for: 5m
