@@ -8,8 +8,7 @@ contactPoints:
         type: telegram
         settings:
           bottoken: "${TELEGRAM_BOT_TOKEN_IOT}"
-          chatid: |-
-            ${TELEGRAM_CHAT_ID_IOT}
+          chatid: ${TELEGRAM_CHAT_ID_IOT}
           parse_mode: "HTML"
           disable_web_page_preview: true
           protect_content: false
@@ -39,8 +38,7 @@ contactPoints:
         type: telegram
         settings:
           bottoken: "${TELEGRAM_BOT_TOKEN_SERVER}"
-          chatid: |-
-            ${TELEGRAM_CHAT_ID_SERVER}
+          chatid: ${TELEGRAM_CHAT_ID_SERVER}
           parse_mode: "HTML"
           disable_web_page_preview: true
           protect_content: false
