@@ -99,7 +99,7 @@ for i in $(seq 1 "$WORKER_COUNT"); do
         --region "$REGION" \
         --image-id "$AMI_ID" \
         --instance-type "$INSTANCE_TYPE" \
-        --network-interfaces "AssociatePublicIpAddress=true,DeviceIndex=0,SubnetId=$SUBNET_ID,Groups=$SG_ID" \
+        --network-interfaces "AssociatePublicIpAddress=false,DeviceIndex=0,SubnetId=$SUBNET_ID,Groups=$SG_ID" \
         --iam-instance-profile "Name=$WORKER_IAM_PROFILE" \
         --metadata-options "HttpTokens=optional,HttpEndpoint=enabled" \
         --user-data "$USER_DATA" \
@@ -162,10 +162,14 @@ echo "[4/5] Submitting Spark job..."
 
 source "$(dirname "$0")/.venv/bin/activate"
 
+# Deteksi IP VPC driver secara dinamis
+DRIVER_IP=$(hostname -I | awk '{print $1}')
+echo "  Driver IP  : $DRIVER_IP"
+
 spark-submit \
     --master "$SPARK_MASTER" \
-    --conf spark.driver.host=10.0.1.127 \
-    --conf spark.driver.bindAddress=10.0.1.127 \
+    --conf spark.driver.host="$DRIVER_IP" \
+    --conf spark.driver.bindAddress="$DRIVER_IP" \
     --conf spark.dynamicAllocation.enabled=false \
     --executor-memory 1g \
     --driver-memory 512m \

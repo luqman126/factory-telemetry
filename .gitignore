@@ -23,7 +23,6 @@ benchmarks/results/
 Thumbs.db
 
 # Grafana
-grafana/provisioning/alerting/contact-points.yaml
 
 # IDE / AI Agent metadata
 .agents/
