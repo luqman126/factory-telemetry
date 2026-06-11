@@ -393,7 +393,7 @@ python simulator.py
 ## Catatan
 
 - `.env` tidak di-commit ke git. Gunakan `.env.example` sebagai acuan.
-- `grafana/provisioning/alerting/contact-points.yaml` tidak di-commit. Gunakan `.example` as acuan.
+- `grafana/provisioning/alerting/contact-points.yaml` di-commit secara aman ke git karena kredensialnya dibaca dinamis dari file `.env`.
 - `infra/mosquitto/passwd` tidak di-commit (berisi hashed password). Generate ulang via `mosquitto_passwd`.
 - `db/init.sql` di datalayer-1 dijalankan sekali via provisioning script. Lihat `docs/runbook-db-setup.md`.
 - `spark-jobs/data/` tidak di-commit ke git.

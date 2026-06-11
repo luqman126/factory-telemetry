@@ -220,7 +220,7 @@ Attached to: `applayer-1`, dan dipakai sebagai instance profile ke ephemeral wor
 |---------|---------|------|
 | **Tailscale** | Zero-trust SSH ke applayer-1 (Bastion) | Database nodes tidak menggunakan Tailscale (private subnet, tanpa internet) |
 | **Cloudflare Tunnel** | User access Grafana di `grafana.chescloud.my.id` | Tidak ada inbound port 3000 dari internet |
-| **Telegram Bot** | Alerting dari Grafana | Bot token + chat ID di `contact-points.yaml` (gitignored) |
+| **Telegram Bot** | Alerting dari Grafana | Bot token + chat ID di `contact-points.yaml` (committed, credentials in `.env`) |
 
 ---
 
