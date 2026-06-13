@@ -26,14 +26,18 @@ echo "=== [1/6] Installing PostgreSQL 16 ==="
 dnf install -y postgresql16-server postgresql16-contrib postgresql16-private-devel
 
 echo "=== [2/6] Installing TimescaleDB ==="
-cat > /etc/yum.repos.d/timescaledb.repo <<'EOF'
+if rpm -q timescaledb-2-postgresql-16 >/dev/null 2>&1; then
+    echo "TimescaleDB is already installed. Skipping repository setup."
+else
+    cat > /etc/yum.repos.d/timescaledb.repo <<'EOF'
 [timescaledb]
 name=TimescaleDB
 baseurl=https://packagecloud.io/timescale/timescaledb/el/9/$basearch
 gpgcheck=0
 enabled=1
 EOF
-dnf install -y timescaledb-2-postgresql-16
+    dnf install -y timescaledb-2-postgresql-16
+fi
 
 echo "=== [3/6] Fixing TimescaleDB paths (Amazon Linux 2023 compatibility) ==="
 ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.so /usr/lib64/pgsql/
