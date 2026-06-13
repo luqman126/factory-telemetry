@@ -388,18 +388,18 @@ python simulator.py
 | 10    | Automasi Pipeline Jam-an & Setup Monitoring     | ✅ Selesai  |
 | 11    | Security hardening: private subnet + VPC Endpoint | ✅ Selesai  |
 
----
-
 ## Roadmap & Future Enhancements
 
 Meskipun sistem V1 ini sudah memungkinkan untuk diterapkan di lingkungan produksi, ada beberapa *upgrade* arsitektur dan operasional yang bisa diimplementasikan ke depannya untuk mencapai standar skala *Enterprise*:
 
-1. **Infrastructure as Code (IaC) menggunakan Terraform**
+1. **Infrastructure as Code (IaC) menggunakan Terraform** (✅ **Sudah Diimplementasikan untuk Staging**)
    - **Tujuan:** Mendeskripsikan spesifikasi seluruh jaringan dan *server* AWS (VPC, EC2, S3, Endpoint) ke dalam *file* `.tf`.
+   - **Status:** File konfigurasi siap pakai terletak di [infra/terraform/](file:///home/cheshire/iot-bigdata-project/infra/terraform/). Lihat panduan lengkapnya di [Terraform README](file:///home/cheshire/iot-bigdata-project/infra/terraform/README.md).
    - **Keuntungan:** Memungkinkan replikasi lingkungan (*Staging* ke *Production*) dengan sekali jalan (`terraform apply`), serta menjadi *backup plan* yang sempurna (*disaster recovery*) tanpa harus menyentuh AWS Console lagi.
 
-2. **CI/CD Pipeline menggunakan GitHub Actions**
+2. **CI/CD Pipeline menggunakan GitHub Actions** (✅ **Sudah Diimplementasikan untuk Staging**)
    - **Tujuan:** Mengotomatiskan alur *deployment* jika ada perubahan fitur di repositori.
+   - **Status:** Pipeline otomatis dikonfigurasi pada [.github/workflows/deploy-staging.yml](file:///home/cheshire/iot-bigdata-project/.github/workflows/deploy-staging.yml) untuk otomatisasi deploy ke *Staging applayer-1* setiap kali ada push ke branch `staging`.
    - **Keuntungan:** Tidak perlu lagi *login* SSH manual ke *server* hanya untuk `git pull` dan me-*restart service*. *Pipeline* akan mengeksekusinya secara aman, konsisten, dan bebas dari *human error*.
 
 3. **Real-Time Streaming Analytics (Spark Structured Streaming)**

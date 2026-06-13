@@ -1,0 +1,53 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches:
+      - staging
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH to AWS Staging
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          port: 22
+          script: |
+            echo "=== MEMULAI DEPLOYMENT KE STAGING ==="
+            cd /home/ec2-user/iot-bigdata-project
+
+            # 1. Fetch dan Pull kode terbaru dari branch staging
+            echo "-> Pulling latest code..."
+            git fetch origin
+            git checkout staging
+            git reset --hard origin/staging
+
+            # 2. Update Python dependencies untuk Backend (jika ada perubahan)
+            if [ -f "backend/requirements.txt" ]; then
+              echo "-> Updating backend dependencies..."
+              /home/ec2-user/iot-bigdata-project/backend/.venv/bin/pip install -r backend/requirements.txt
+            fi
+
+            # 3. Restart systemd service iot-backend
+            echo "-> Restarting systemd iot-backend service..."
+            sudo systemctl restart iot-backend
+
+            # 4. Restart Docker Compose services (Mosquitto, Grafana, Prometheus)
+            echo "-> Restarting Docker Compose containers..."
+            cd infra
+            docker compose up -d --build
+
+            # 5. Cek Status Service
+            echo "-> Checking backend status..."
+            sudo systemctl status iot-backend --no-pager -l
+
+            echo "=== DEPLOYMENT STAGING SELESAI ==="

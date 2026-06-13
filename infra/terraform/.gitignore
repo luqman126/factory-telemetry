@@ -1,0 +1,24 @@
+# Local .terraform directory (plugins, modules, providers)
+.terraform/
+
+# Terraform state files (local state)
+*.tfstate
+*.tfstate.*
+
+# Crash log files
+crash.log
+crash.*.log
+
+# Exclude all variable files that might contain secrets (except staging.tfvars which contains public variables)
+*.tfvars
+!environments/staging.tfvars
+
+# Ignore override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Ignore CLI configuration files
+.terraformrc
+terraform.rc
