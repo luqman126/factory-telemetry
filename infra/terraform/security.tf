@@ -9,7 +9,7 @@
 # Untuk: applayer (FastAPI, MQTT, Grafana, Spark Master)
 resource "aws_security_group" "applayer" {
   name        = "${var.project_name}-${var.environment}-applayer-sg"
-  description = "SG untuk app layer — Bastion Host, MQTT, Grafana"
+  description = "SG untuk app layer - Bastion Host, MQTT, Grafana"
   vpc_id      = aws_vpc.main.id
 
   # Outbound: semua traffic diizinkan
@@ -29,7 +29,7 @@ resource "aws_security_group" "applayer" {
 # Untuk: datalayer-1 (DB Primary), datalayer-2 (DB Replica)
 resource "aws_security_group" "datalayer" {
   name        = "${var.project_name}-${var.environment}-datalayer-sg"
-  description = "SG untuk database layer — PostgreSQL + replication"
+  description = "SG untuk database layer - PostgreSQL + replication"
   vpc_id      = aws_vpc.main.id
 
   # Outbound: semua traffic diizinkan
