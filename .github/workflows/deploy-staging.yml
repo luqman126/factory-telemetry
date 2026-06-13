@@ -19,7 +19,25 @@ jobs:
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
 
-      - name: Deploy via SSH to AWS Staging
+      - name: Deploy Code via Rsync
+        run: |
+          # 1. Siapkan SSH key di Runner
+          mkdir -p ~/.ssh
+          echo "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          # 2. Buat folder tujuan di server jika belum ada
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} "mkdir -p /home/ec2-user/iot-bigdata-project"
+
+          # 3. Kirim file menggunakan rsync (abaikan folder git & terraform)
+          echo "-> Pushing code to staging server..."
+          rsync -avz -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa" \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude 'infra/terraform/' \
+            ./ ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }}:/home/ec2-user/iot-bigdata-project/
+
+      - name: Restart Services via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.STAGING_HOST }}
@@ -27,20 +45,19 @@ jobs:
           key: ${{ secrets.STAGING_SSH_KEY }}
           port: 22
           script: |
-            echo "=== MEMULAI DEPLOYMENT KE STAGING ==="
+            echo "=== MENJALANKAN POST-DEPLOYMENT SETUP ==="
             cd /home/ec2-user/iot-bigdata-project
 
-            # 1. Fetch dan Pull kode terbaru dari branch staging
-            echo "-> Pulling latest code..."
-            git fetch origin
-            git checkout staging
-            git reset --hard origin/staging
-
-            # 2. Update Python dependencies untuk Backend (jika ada perubahan)
-            if [ -f "backend/requirements.txt" ]; then
-              echo "-> Updating backend dependencies..."
-              /home/ec2-user/iot-bigdata-project/backend/.venv/bin/pip install -r backend/requirements.txt
+            # 1. Inisialisasi python virtual environment jika belum ada
+            if [ ! -d "backend/.venv" ]; then
+              echo "-> Creating python virtual environment..."
+              python3 -m venv backend/.venv
             fi
+
+            # 2. Update Python dependencies untuk Backend
+            echo "-> Updating backend dependencies..."
+            /home/ec2-user/iot-bigdata-project/backend/.venv/bin/pip install --upgrade pip
+            /home/ec2-user/iot-bigdata-project/backend/.venv/bin/pip install -r backend/requirements.txt
 
             # 3. Restart systemd service iot-backend
             echo "-> Restarting systemd iot-backend service..."
@@ -48,7 +65,7 @@ jobs:
 
             # 4. Restart Docker Compose services (Mosquitto, Grafana, Prometheus)
             echo "-> Restarting Docker Compose containers..."
-            cd infra
+            cd /home/ec2-user/iot-bigdata-project/infra
             docker compose up -d --build
 
             # 5. Cek Status Service
