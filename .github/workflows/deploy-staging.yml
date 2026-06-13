@@ -59,13 +59,32 @@ jobs:
             /home/ec2-user/iot-bigdata-project/backend/.venv/bin/pip install --upgrade pip
             /home/ec2-user/iot-bigdata-project/backend/.venv/bin/pip install -r backend/requirements.txt
 
-            # 3. Restart systemd service iot-backend
+            # 3. Setup & Restart systemd service iot-backend
+            if [ ! -f "/etc/systemd/system/iot-backend.service" ]; then
+              echo "-> Copying systemd service file..."
+              sudo cp /home/ec2-user/iot-bigdata-project/infra/systemd/iot-backend.service /etc/systemd/system/
+              sudo systemctl daemon-reload
+              sudo systemctl enable iot-backend
+            else
+              # Jika ada perubahan file service, selalu lakukan daemon-reload
+              sudo cp /home/ec2-user/iot-bigdata-project/infra/systemd/iot-backend.service /etc/systemd/system/
+              sudo systemctl daemon-reload
+            fi
+
             echo "-> Restarting systemd iot-backend service..."
             sudo systemctl restart iot-backend
 
             # 4. Restart Docker Compose services (Mosquitto, Grafana, Prometheus)
             echo "-> Restarting Docker Compose containers..."
             cd /home/ec2-user/iot-bigdata-project/infra
+
+            if ! docker compose version >/dev/null 2>&1; then
+              echo "-> Docker Compose V2 not found. Downloading from GitHub..."
+              sudo mkdir -p /usr/libexec/docker/cli-plugins
+              sudo curl -SL https://github.com/docker/compose/releases/download/v2.26.1/docker-compose-linux-x86_64 -o /usr/libexec/docker/cli-plugins/docker-compose
+              sudo chmod +x /usr/libexec/docker/cli-plugins/docker-compose
+            fi
+
             docker compose up -d --build
 
             # 5. Cek Status Service

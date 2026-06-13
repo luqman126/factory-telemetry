@@ -97,11 +97,15 @@ resource "aws_instance" "applayer" {
               dnf update -y
               dnf install -y git python3 python3-pip
 
-              # 2. Install & jalankan Docker + Docker Compose v2
+              # 2. Install & jalankan Docker + Docker Compose v2 (Standar AL2023)
               dnf install -y docker
-              dnf install -y docker-compose-plugin
               systemctl enable --now docker
               usermod -aG docker ec2-user
+
+              # Download & install Docker Compose V2 secara manual karena tidak ada di repo AL2023
+              mkdir -p /usr/libexec/docker/cli-plugins
+              curl -SL https://github.com/docker/compose/releases/download/v2.26.1/docker-compose-linux-x86_64 -o /usr/libexec/docker/cli-plugins/docker-compose
+              chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
               # 3. Install Tailscale
               curl -fsSL https://tailscale.com/install.sh | sh
