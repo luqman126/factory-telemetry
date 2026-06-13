@@ -1,0 +1,17 @@
+# ============================================================
+# ACL (Access Control List) untuk Mosquitto Broker
+# ============================================================
+
+# Backend / consumer user
+user kagebyo
+topic readwrite #
+
+# IoT Devices / Simulator
+user device_001
+topic readwrite #
+
+user device_002
+topic readwrite #
+
+# Jaring pengaman pattern (untuk custom username yang di-generate)
+pattern readwrite #
