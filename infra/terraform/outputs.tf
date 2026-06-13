@@ -30,12 +30,12 @@ output "applayer_private_ip" {
 
 output "datalayer_1_private_ip" {
   description = "Private IP dari datalayer-1 (DB Primary)"
-  value       = aws_instance.datalayer_1.private_ip
+  value       = aws_instance.datalayer_primary.private_ip
 }
 
 output "datalayer_2_private_ip" {
   description = "Private IP dari datalayer-2 (DB Replica)"
-  value       = aws_instance.datalayer_2.private_ip
+  value       = aws_instance.datalayer_replica.private_ip
 }
 
 output "worker_sg_id" {
@@ -50,7 +50,7 @@ output "worker_subnet_id" {
 
 output "iam_instance_profile_name" {
   description = "IAM Instance Profile name untuk worker"
-  value       = aws_iam_instance_profile.app_profile.name
+  value       = aws_iam_instance_profile.applayer.name
 }
 
 # ---- Summary ----
@@ -62,8 +62,8 @@ output "connection_info" {
     ${upper(var.environment)} Environment Ready!
     ============================================
     Bastion (applayer):  ssh ec2-user@${aws_instance.applayer.public_ip}
-    DB Primary:          ssh -J ec2-user@${aws_instance.applayer.public_ip} ec2-user@${aws_instance.datalayer_1.private_ip}
-    DB Replica:          ssh -J ec2-user@${aws_instance.applayer.public_ip} ec2-user@${aws_instance.datalayer_2.private_ip}
+    DB Primary:          ssh -J ec2-user@${aws_instance.applayer.public_ip} ec2-user@${aws_instance.datalayer_primary.private_ip}
+    DB Replica:          ssh -J ec2-user@${aws_instance.applayer.public_ip} ec2-user@${aws_instance.datalayer_replica.private_ip}
     ============================================
 
   EOT
