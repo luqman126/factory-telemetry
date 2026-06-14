@@ -54,8 +54,9 @@ jobs:
 
             # 1. Inisialisasi python virtual environment jika belum ada
             if [ ! -d "backend/.venv" ]; then
-              echo "-> Creating python virtual environment..."
-              python3 -m venv backend/.venv
+              echo "-> Installing Python 3.12 and creating virtual environment..."
+              sudo dnf install -y python3.12
+              python3.12 -m venv backend/.venv
             fi
 
             # 2. Update Python dependencies untuk Backend
