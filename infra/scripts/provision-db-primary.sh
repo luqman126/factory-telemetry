@@ -71,10 +71,15 @@ wal_keep_size = 256MB
 listen_addresses = '*'
 EOF
 
+LOCAL_PREFIX=$(hostname -I | awk '{print $1}' | cut -d. -f1,2)
+
 cat >> "$PGDATA/pg_hba.conf" <<EOF
 
 # App node (applayer-1) — password auth
-host    all             ${DB_USER}       10.0.1.0/24       scram-sha-256
+host    all             ${DB_USER}       ${LOCAL_PREFIX}.1.0/24       scram-sha-256
+
+# App + services (dari private subnet — Spark Worker, etc.)
+host    all             ${DB_USER}       ${LOCAL_PREFIX}.2.0/24       scram-sha-256
 
 # Replication from replica (datalayer-2)
 host    replication     replicator       ${REPLICA_IP}/32   scram-sha-256

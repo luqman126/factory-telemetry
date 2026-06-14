@@ -12,30 +12,41 @@ prometheus.exporter.unix "node_metrics" {
   // Gunakan konfigurasi default
 }
 
-// Opsional: Aktifkan Exporter Postgres pada database nodes (datalayer-1 / datalayer-2)
-// Hapus tanda komentar (//) di bawah ini pada server database untuk memantau Postgres/TimescaleDB.
+// Integrasi Exporter Postgres pada database nodes (datalayer-1 / datalayer-2)
+// AKTIFKAN HANYA DI SERVER DATABASE (Hapus tanda komentar //)
 //
 // prometheus.exporter.postgres "postgres_metrics" {
-//   data_source_names = ["postgresql://kagebyo:kagebyo126x@localhost:5432/iot_db?sslmode=disable"]
+//   # Sesuaikan host (localhost), port (5432), dan nama database (staging_iot_db atau iot_db)
+//   data_source_names = ["postgresql://kagebyo:kagebyo126x@localhost:5432/staging_iot_db?sslmode=disable"]
 // }
 
 
 // ------------------------------------------------------------
-// 2. SCRAPE JOBS (Proses Penarikan Data Exporter)
+// 2. SCRAPE JOBS (Proses Penarikan Data Exporter & Naming Instance)
 // ------------------------------------------------------------
+
+// Komponen relabel untuk penamaan instance agar tidak menggunakan default localhost
+prometheus.relabel "rename_instance" {
+  forward_to = [prometheus.remote_write.prometheus_server.receiver]
+  rule {
+    action       = "replace"
+    target_label = "instance"
+    // GANTI SESUAI NAMA HOST: "applayer-1", "datalayer-1", atau "datalayer-2"
+    replacement  = "applayer-1"
+  }
+}
 
 // Menarik data metrik sistem host
 prometheus.scrape "scrape_node" {
   targets    = prometheus.exporter.unix.node_metrics.targets
-  forward_to = [prometheus.remote_write.prometheus_server.receiver]
+  forward_to = [prometheus.relabel.rename_instance.receiver]
 }
 
-// Opsional: Menarik data metrik database Postgres
-// Hapus tanda komentar (//) di bawah ini pada server database untuk memantau Postgres/TimescaleDB.
+// Menarik data metrik database Postgres (Aktifkan hanya di server database)
 //
 // prometheus.scrape "scrape_postgres" {
 //   targets    = prometheus.exporter.postgres.postgres_metrics.targets
-//   forward_to = [prometheus.remote_write.prometheus_server.receiver]
+//   forward_to = [prometheus.relabel.rename_instance.receiver]
 // }
 
 
@@ -44,7 +55,9 @@ prometheus.scrape "scrape_node" {
 // ------------------------------------------------------------
 prometheus.remote_write "prometheus_server" {
   endpoint {
-    // Alamat IP Private applayer-1 server Prometheus
-    url = "http://10.0.1.127:9090/api/v1/write"
+    // Alamat IP Private applayer-1 server Prometheus (sesuaikan dengan environment)
+    // Staging: http://10.1.1.208:9090/api/v1/write
+    // Production: http://10.0.1.127:9090/api/v1/write
+    url = "http://10.1.1.208:9090/api/v1/write"
   }
 }
