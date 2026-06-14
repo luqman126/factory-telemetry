@@ -54,30 +54,40 @@ jobs:
 
             # 1. Inisialisasi python virtual environment jika belum ada
             if [ ! -d "backend/.venv" ]; then
-              echo "-> Installing Python 3.12 and creating virtual environment..."
+              echo "-> Installing Python 3.12 and creating virtual environment for backend..."
               sudo dnf install -y python3.12
               python3.12 -m venv backend/.venv
             fi
 
-            # 2. Update Python dependencies untuk Backend
+            if [ ! -d "spark-jobs/.venv" ]; then
+              echo "-> Creating virtual environment for spark-jobs..."
+              python3.12 -m venv spark-jobs/.venv
+            fi
+
+            # 2. Update Python dependencies
             echo "-> Updating backend dependencies..."
             /home/ec2-user/iot-bigdata-project/backend/.venv/bin/pip install --upgrade pip
             /home/ec2-user/iot-bigdata-project/backend/.venv/bin/pip install -r backend/requirements.txt
 
-            # 3. Setup & Restart systemd service iot-backend
-            if [ ! -f "/etc/systemd/system/iot-backend.service" ]; then
-              echo "-> Copying systemd service file..."
-              sudo cp /home/ec2-user/iot-bigdata-project/infra/systemd/iot-backend.service /etc/systemd/system/
-              sudo systemctl daemon-reload
-              sudo systemctl enable iot-backend
-            else
-              # Jika ada perubahan file service, selalu lakukan daemon-reload
-              sudo cp /home/ec2-user/iot-bigdata-project/infra/systemd/iot-backend.service /etc/systemd/system/
-              sudo systemctl daemon-reload
-            fi
+            echo "-> Updating spark-jobs dependencies..."
+            /home/ec2-user/iot-bigdata-project/spark-jobs/.venv/bin/pip install --upgrade pip
+            /home/ec2-user/iot-bigdata-project/spark-jobs/.venv/bin/pip install -r spark-jobs/requirements.txt
 
+            # 3. Setup & Restart systemd service iot-backend
+            echo "-> Setting up systemd iot-backend service..."
+            sudo cp /home/ec2-user/iot-bigdata-project/infra/systemd/iot-backend.service /etc/systemd/system/
+            sudo systemctl daemon-reload
+            sudo systemctl enable iot-backend
             echo "-> Restarting systemd iot-backend service..."
             sudo systemctl restart iot-backend
+
+            # 3b. Setup & Enable systemd service & timer untuk Spark Analytics
+            echo "-> Setting up systemd iot-analytics service and timer..."
+            sudo chmod +x /home/ec2-user/iot-bigdata-project/spark-jobs/run_hourly_pipeline.sh
+            sudo cp /home/ec2-user/iot-bigdata-project/infra/systemd/iot-analytics.service /etc/systemd/system/
+            sudo cp /home/ec2-user/iot-bigdata-project/infra/systemd/iot-analytics.timer /etc/systemd/system/
+            sudo systemctl daemon-reload
+            sudo systemctl enable --now iot-analytics.timer
 
             # 4. Restart Docker Compose services (Mosquitto, Grafana, Prometheus)
             echo "-> Restarting Docker Compose containers..."
@@ -95,5 +105,9 @@ jobs:
             # 5. Cek Status Service
             echo "-> Checking backend status..."
             sudo systemctl status iot-backend --no-pager -l
+
+            echo "-> Checking spark-analytics timer status..."
+            sudo systemctl status iot-analytics.timer --no-pager -l
+            sudo systemctl list-timers --all | grep iot-analytics || true
 
             echo "=== DEPLOYMENT STAGING SELESAI ==="
