@@ -95,7 +95,7 @@ resource "aws_instance" "applayer" {
               #!/bin/bash
               # 1. Update system & install package dasar
               dnf update -y
-              dnf install -y git python3 python3-pip
+              dnf install -y git python3 python3-pip java-21-amazon-corretto-devel
 
               # 2. Install & jalankan Docker + Docker Compose v2 (Standar AL2023)
               dnf install -y docker
