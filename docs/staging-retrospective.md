@@ -361,7 +361,7 @@ This phase had the **most failures** — 7 distinct issues.
 | # | Phase | Error Summary | Root Cause | Fix Applied | Automated? |
 |---|-------|--------------|------------|-------------|------------|
 | 1 | Terraform | `Reference to undeclared resource` in outputs.tf | Resource name mismatch | Updated outputs.tf references | ✅ |
-| 2 | Docker | Mosquitto `passwd` file not found | Password file not pre-generated | Ran `generate_mqtt_passwd.sh` | ⚠️ |
+| 2 | Docker | Mosquitto `passwd` file not found | Password file not pre-generated | Auto-generated via CI/CD from .env | ✅ |
 | 3 | Docker | Grafana plugin provisioning dir missing | Missing empty directory | Non-fatal warning, ignored | ✅ |
 | 4 | SSL | MQTT cert `fullchain.pem` not found | Certbot not yet run | Ran Certbot with DNS-01 challenge | ⚠️ |
 | 5 | Database | TimescaleDB repo timeout | Private subnet has no internet | Downloaded RPMs on bastion, scp'd | ⚠️ |
@@ -372,20 +372,20 @@ This phase had the **most failures** — 7 distinct issues.
 | 10 | Database | `pg_hba.conf` rejects staging IPs | Hardcoded `10.0.1.0/24` | Dynamic prefix detection | ✅ |
 | 11 | Database | Replica also rejects connections | Same hardcoded CIDR on replica | Same dynamic prefix fix | ✅ |
 | 12 | Backend | Venv interpreter mismatch | Rsync'd Ubuntu venv to AL2023 | Exclude venvs, build natively | ✅ |
-| 13 | Backend | Python 3.12 not installed | Not in base AMI | Added `dnf install python3.12` to CI/CD | ⚠️ |
+| 13 | Backend | Python 3.12 not installed | Not in base AMI | Added to compute.tf user_data | ✅ |
 | 14 | Backend | Wrong `POSTGRES_DB` in `.env` | Manual config error | Manually corrected `.env` | ⚠️ |
 | 15 | Grafana | Login rejected despite correct `.env` | Credentials only applied on first boot | Reset via `grafana cli` | ✅ |
 | 16 | Grafana | PostgreSQL panels "No Data" | Hardcoded `datname="iot_db"` | Changed to regex `(staging_)?iot_db` | ✅ |
 | 17 | Alloy | Package not found via dnf | Grafana repo not configured | Manually configured repo | ⚠️ |
 | 18 | Alloy | Architecture mismatch (aarch64) | Wrong arch from repo | Specified x86_64 explicitly | ⚠️ |
-| 19 | Alloy | `pg_ls_waldir` permission denied | Missing `pg_monitor` role | `GRANT pg_monitor TO kagebyo` | ⚠️ |
+| 19 | Alloy | `pg_ls_waldir` permission denied | Missing `pg_monitor` role | Added to provision-db-primary.sh | ✅ |
 | 20 | Alloy | Config points to production Prometheus | Hardcoded production IP | Updated to staging IP | ⚠️ |
 | 21 | Spark | Timer/service not deployed by CI/CD | Missing from deploy script | Added to `deploy-staging.yml` | ✅ |
-| 22 | Spark | PySpark build: no space on `/tmp` | tmpfs size limit (957 MB) | Set `TMPDIR` to disk-backed path | ⚠️ |
+| 22 | Spark | PySpark build: no space on `/tmp` | tmpfs size limit (957 MB) | Set custom `TMPDIR` in CI/CD pipeline | ✅ |
 | 23 | Spark | `JAVA_HOME is not set` in systemd | Systemd strips env vars | Dynamic detection in pipeline script | ✅ |
 | 24 | Spark | Java 21 not installed | Not in Terraform bootstrap | Added to `compute.tf` user_data | ✅ |
 
-**Score**: 14/24 fully automated (✅), 10/24 still require manual intervention (⚠️).
+**Score**: 18/24 fully automated (✅), 6/24 still require manual intervention (⚠️).
 
 ---
 
@@ -418,12 +418,12 @@ These can be implemented immediately by extending existing scripts:
 
 | Item | Current State | Target State | How |
 |------|--------------|--------------|-----|
-| Python 3.12 | Installed manually | Auto-installed | Add to Terraform `user_data` |
+| Python 3.12 | Installed manually | Auto-installed | ✅ Added to Terraform `user_data` |
 | Java 21 | Installed manually | Auto-installed | ✅ Already added to `compute.tf` |
-| Spark 3.5.8 | Downloaded manually | Auto-installed | Add download + extract to `user_data` |
-| `pg_monitor` grant | Manual SQL command | Auto-granted | Add to `provision-db-primary.sh` |
-| Mosquitto password | Manual script run | Auto-generated | Add to CI/CD post-deploy or `user_data` |
-| `TMPDIR` for pip | Manual export | Auto-set | Add `Environment=TMPDIR=/home/ec2-user/tmp` to systemd or CI/CD script |
+| Spark 3.5.8 | Downloaded manually | Auto-installed | ✅ Added download + extract to `user_data` |
+| `pg_monitor` grant | Manual SQL command | Auto-granted | ✅ Added to `provision-db-primary.sh` |
+| Mosquitto password | Manual script run | Auto-generated | ✅ Added to CI/CD post-deploy (deploy-staging.yml) |
+| `TMPDIR` for pip | Manual export | Auto-set | ✅ Added to CI/CD pipeline (deploy-staging.yml) |
 
 ### Tier 2: Medium Effort (Architecture improvements)
 

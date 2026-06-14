@@ -64,7 +64,11 @@ jobs:
               python3.12 -m venv spark-jobs/.venv
             fi
 
-            # 2. Update Python dependencies
+            # 2. Update Python dependencies (with custom TMPDIR to avoid tmpfs space limits)
+            echo "-> Setting up custom TMPDIR for pip installs..."
+            mkdir -p /home/ec2-user/tmp
+            export TMPDIR=/home/ec2-user/tmp
+
             echo "-> Updating backend dependencies..."
             /home/ec2-user/iot-bigdata-project/backend/.venv/bin/pip install --upgrade pip
             /home/ec2-user/iot-bigdata-project/backend/.venv/bin/pip install -r backend/requirements.txt
@@ -92,6 +96,31 @@ jobs:
             # 4. Restart Docker Compose services (Mosquitto, Grafana, Prometheus)
             echo "-> Restarting Docker Compose containers..."
             cd /home/ec2-user/iot-bigdata-project/infra
+
+            if [ -d "mosquitto/passwd" ]; then
+              echo "-> Removing incorrect directory mosquitto/passwd..."
+              sudo rm -rf mosquitto/passwd
+            fi
+
+            if [ ! -f "mosquitto/passwd" ]; then
+              echo "-> Generating Mosquitto password file..."
+              if [ -f ".env" ]; then
+                set -a
+                source .env
+                set +a
+                if [ ! -z "$MQTT_USER" ] && [ ! -z "$MQTT_PASSWORD" ]; then
+                  mkdir -p mosquitto
+                  touch mosquitto/passwd
+                  chmod 666 mosquitto/passwd
+                  chmod +x generate_mqtt_passwd.sh
+                  ./generate_mqtt_passwd.sh "$MQTT_USER" "$MQTT_PASSWORD"
+                else
+                  echo "WARNING: MQTT_USER or MQTT_PASSWORD not set in .env"
+                fi
+              else
+                echo "WARNING: .env file not found in infra/ folder"
+              fi
+            fi
 
             if ! docker compose version >/dev/null 2>&1; then
               echo "-> Docker Compose V2 not found. Downloading from GitHub..."

@@ -95,7 +95,7 @@ resource "aws_instance" "applayer" {
               #!/bin/bash
               # 1. Update system & install package dasar
               dnf update -y
-              dnf install -y git python3 python3-pip java-21-amazon-corretto-devel
+              dnf install -y git python3 python3-pip python3.12 java-21-amazon-corretto-devel
 
               # 2. Install & jalankan Docker + Docker Compose v2 (Standar AL2023)
               dnf install -y docker
@@ -107,7 +107,18 @@ resource "aws_instance" "applayer" {
               curl -SL https://github.com/docker/compose/releases/download/v2.26.1/docker-compose-linux-x86_64 -o /usr/libexec/docker/cli-plugins/docker-compose
               chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
-              # 3. Install Tailscale
+              # 3. Install & configure Spark 3.5.8
+              cd /opt
+              curl -SL https://archive.apache.org/dist/spark/spark-3.5.8/spark-3.5.8-bin-hadoop3.tgz -o spark-3.5.8-bin-hadoop3.tgz
+              tar -xzf spark-3.5.8-bin-hadoop3.tgz
+              ln -sf /opt/spark-3.5.8-bin-hadoop3 /opt/spark
+              rm -f spark-3.5.8-bin-hadoop3.tgz
+              mkdir -p /opt/spark/logs /opt/spark/work
+              chown -R ec2-user:ec2-user /opt/spark-3.5.8-bin-hadoop3 /opt/spark/logs /opt/spark/work
+              echo 'export SPARK_HOME=/opt/spark' > /etc/profile.d/spark.sh
+              echo 'export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin' >> /etc/profile.d/spark.sh
+
+              # 4. Install Tailscale
               curl -fsSL https://tailscale.com/install.sh | sh
               systemctl enable --now tailscaled
               EOF
