@@ -23,7 +23,7 @@ PRIMARY_IP="$1"
 DB_PASSWORD="$2"
 
 echo "=== [1/6] Installing PostgreSQL 16 ==="
-dnf install -y postgresql16-server postgresql16-contrib postgresql16-private-devel
+dnf install -y postgresql16-server postgresql16-contrib postgresql16-server-devel
 
 echo "=== [2/6] Installing TimescaleDB ==="
 if rpm -q timescaledb-2-postgresql-16 >/dev/null 2>&1; then

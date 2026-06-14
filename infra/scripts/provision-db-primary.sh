@@ -23,7 +23,7 @@ DB_PASSWORD="$3"
 REPLICA_IP="$4"
 
 echo "=== [1/7] Installing PostgreSQL 16 ==="
-dnf install -y postgresql16-server postgresql16-contrib postgresql16-private-devel
+dnf install -y postgresql16-server postgresql16-contrib postgresql16-server-devel
 postgresql-setup --initdb
 
 echo "=== [2/7] Installing TimescaleDB ==="
