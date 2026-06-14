@@ -35,6 +35,10 @@ jobs:
             --exclude '.git/' \
             --exclude '.github/' \
             --exclude 'infra/terraform/' \
+            --exclude 'backend/.venv/' \
+            --exclude 'simulator/.venv/' \
+            --exclude 'spark-jobs/.venv/' \
+            --exclude '*/__pycache__/' \
             ./ ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }}:/home/ec2-user/iot-bigdata-project/
 
       - name: Restart Services via SSH
