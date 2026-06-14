@@ -27,6 +27,25 @@ if [ -f "$ENV_PATH" ]; then
     export $(grep -v '^#' "$ENV_PATH" | xargs)
 fi
 
+# Resolve JAVA_HOME jika belum di-set (sangat penting untuk systemd service)
+if [ -z "$JAVA_HOME" ]; then
+    if command -v java >/dev/null 2>&1; then
+        JAVA_PATH=$(readlink -f $(command -v java))
+        export JAVA_HOME="${JAVA_PATH%/bin/java}"
+        echo "Resolved JAVA_HOME to: $JAVA_HOME"
+    else
+        echo "WARNING: java command not found" >&2
+    fi
+fi
+
+# Resolve SPARK_HOME jika belum di-set
+if [ -z "$SPARK_HOME" ]; then
+    if [ -d "/opt/spark" ]; then
+        export SPARK_HOME="/opt/spark"
+        echo "Resolved SPARK_HOME to: $SPARK_HOME"
+    fi
+fi
+
 # Aktifkan virtual environment
 if [ -d ".venv" ]; then
     echo "Mengaktifkan virtual environment..."
