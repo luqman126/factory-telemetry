@@ -74,14 +74,20 @@ aws ssm put-parameter \
 
 echo "SUCCESS: Kredensial berhasil didaftarkan di SSM Parameter Store."
 
-# 5. Jalankan Sinkronisasi RPM, script, dan init.sql ke S3 di Bastion secara remote
+# 5. Salin script dan database schema dari local ke bastion via SCP
+echo ""
+echo "-> Menyalin script dan file skema database ke Bastion..."
+ssh -o StrictHostKeyChecking=no ec2-user@${BASTION_IP} "mkdir -p /home/ec2-user/iot-bigdata-project/infra/scripts /home/ec2-user/iot-bigdata-project/db"
+scp -o StrictHostKeyChecking=no -r "${PROJECT_DIR}/infra/scripts/"* ec2-user@${BASTION_IP}:/home/ec2-user/iot-bigdata-project/infra/scripts/
+scp -o StrictHostKeyChecking=no "${PROJECT_DIR}/db/init.sql" ec2-user@${BASTION_IP}:/home/ec2-user/iot-bigdata-project/db/init.sql
+
+# 6. Jalankan Sinkronisasi RPM, script, dan init.sql ke S3 di Bastion secara remote
 echo ""
 echo "-> Memicu sinkronisasi paket RPM, script, dan init.sql ke S3 Bucket di Bastion..."
 # Gunakan SSH Agent forwarding agar bastion bisa scp/ssh jika dibutuhkan
 ssh -o StrictHostKeyChecking=no -A ec2-user@${BASTION_IP} "
-  cd /home/ec2-user/iot-bigdata-project
-  chmod +x infra/scripts/sync-packages-to-s3.sh
-  ./infra/scripts/sync-packages-to-s3.sh
+  chmod +x /home/ec2-user/iot-bigdata-project/infra/scripts/sync-packages-to-s3.sh
+  /home/ec2-user/iot-bigdata-project/infra/scripts/sync-packages-to-s3.sh
 "
 
 echo ""
