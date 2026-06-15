@@ -20,7 +20,7 @@ output "private_subnet_id" {
 
 output "applayer_public_ip" {
   description = "Public IP dari applayer (Bastion Host)"
-  value       = aws_instance.applayer.public_ip
+  value       = aws_eip.applayer.public_ip
 }
 
 output "applayer_private_ip" {
@@ -61,9 +61,9 @@ output "connection_info" {
     ============================================
     ${upper(var.environment)} Environment Ready!
     ============================================
-    Bastion (applayer):  ssh ec2-user@${aws_instance.applayer.public_ip}
-    DB Primary:          ssh -J ec2-user@${aws_instance.applayer.public_ip} ec2-user@${aws_instance.datalayer_primary.private_ip}
-    DB Replica:          ssh -J ec2-user@${aws_instance.applayer.public_ip} ec2-user@${aws_instance.datalayer_replica.private_ip}
+    Bastion (applayer):  ssh ec2-user@${aws_eip.applayer.public_ip}
+    DB Primary:          ssh -J ec2-user@${aws_eip.applayer.public_ip} ec2-user@${aws_instance.datalayer_primary.private_ip}
+    DB Replica:          ssh -J ec2-user@${aws_eip.applayer.public_ip} ec2-user@${aws_instance.datalayer_replica.private_ip}
     ============================================
 
   EOT
