@@ -173,3 +173,37 @@ resource "aws_ssm_parameter" "tailscale_auth_key" {
     ignore_changes = [value]
   }
 }
+
+resource "aws_ssm_parameter" "cloudflare_tunnel_token" {
+  name        = "/${var.project_name}/${var.environment}/CLOUDFLARE_TUNNEL_TOKEN"
+  type        = "SecureString"
+  value       = "placeholder_do_not_delete"
+  description = "Cloudflare Tunnel Token for Grafana remote access"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+# ---- Spark Ephemeral Worker SSM Parameters ----
+resource "aws_ssm_parameter" "worker_subnet_id" {
+  name        = "/${var.project_name}/${var.environment}/WORKER_SUBNET_ID"
+  type        = "String"
+  value       = aws_subnet.private.id
+  description = "Subnet ID for ephemeral Spark worker"
+}
+
+resource "aws_ssm_parameter" "worker_sg_id" {
+  name        = "/${var.project_name}/${var.environment}/WORKER_SG_ID"
+  type        = "String"
+  value       = aws_security_group.worker.id
+  description = "Security Group ID for ephemeral Spark worker"
+}
+
+resource "aws_ssm_parameter" "worker_iam_profile" {
+  name        = "/${var.project_name}/${var.environment}/WORKER_IAM_PROFILE"
+  type        = "String"
+  value       = aws_iam_instance_profile.applayer.name
+  description = "IAM Instance Profile name for ephemeral Spark worker"
+}
+

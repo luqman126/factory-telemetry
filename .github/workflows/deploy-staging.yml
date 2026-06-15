@@ -140,6 +140,11 @@ jobs:
               sudo chmod +x /usr/libexec/docker/cli-plugins/docker-compose
             fi
 
+            # 3c. Deploy MQTT SSL Certificates
+            echo "-> Deploying MQTT SSL certificates..."
+            chmod +x scripts/deploy-mqtt-cert.sh
+            sudo ./scripts/deploy-mqtt-cert.sh "staging-mqtt.chescloud.my.id"
+
             docker compose up -d --build
 
             # 4b. Setup Grafana Alloy monitoring agents across nodes

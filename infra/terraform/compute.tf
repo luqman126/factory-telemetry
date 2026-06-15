@@ -163,13 +163,25 @@ dns_cloudflare_api_token = $CF_TOKEN
 SEC
                   chmod 600 /etc/letsencrypt/cloudflare.ini
                   
-                  # Jalankan Certbot DNS-01 challenge untuk domain staging
+                  # Jalankan Certbot DNS-01 challenge untuk domain staging dengan deploy-hook untuk auto-renewal
                   certbot certonly --dns-cloudflare \
                     --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
                     -d "staging-mqtt.${var.domain_name}" \
                     --email "admin@${var.domain_name}" \
                     --agree-tos --no-eff-email \
-                    --non-interactive
+                    --non-interactive \
+                    --deploy-hook "/home/ec2-user/iot-bigdata-project/infra/scripts/deploy-mqtt-cert.sh staging-mqtt.${var.domain_name}"
+              fi
+
+              # 6. Install & Configure Cloudflare Tunnel (cloudflared)
+              curl -L --output cloudflared.rpm https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-x86_64.rpm
+              dnf localinstall -y cloudflared.rpm
+              rm -f cloudflared.rpm
+
+              TUNNEL_TOKEN=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/CLOUDFLARE_TUNNEL_TOKEN" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text || echo "")
+              if [ ! -z "$TUNNEL_TOKEN" ] && [ "$TUNNEL_TOKEN" != "placeholder_do_not_delete" ]; then
+                  echo "-> Installing and starting cloudflared systemd service..."
+                  cloudflared service install "$TUNNEL_TOKEN"
               fi
               EOF
 

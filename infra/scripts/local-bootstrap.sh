@@ -80,9 +80,10 @@ echo ""
 echo "--- Pengisian Kredensial Pihak Ketiga ---"
 read -p "Masukkan Cloudflare API Token (izin Zone.DNS Edit): " CF_TOKEN
 read -p "Masukkan Tailscale Ephemeral/Reusable Auth Key (tskey-auth-...): " TS_KEY
+read -p "Masukkan Cloudflare Tunnel Token (untuk Grafana - opsional): " CF_TUNNEL_TOKEN
 
 if [ -z "$CF_TOKEN" ] || [ -z "$TS_KEY" ]; then
-    echo "ERROR: Kedua token/key tidak boleh kosong." >&2
+    echo "ERROR: Cloudflare API Token dan Tailscale Auth Key tidak boleh kosong." >&2
     exit 1
 fi
 
@@ -107,6 +108,28 @@ aws ssm put-parameter \
   --type "SecureString" \
   --overwrite \
   --region "$AWS_REGION"
+
+if [ ! -z "$CF_TUNNEL_TOKEN" ]; then
+    echo "-> Mendaftarkan Cloudflare Tunnel Token ke AWS SSM..."
+    aws ssm put-parameter \
+      --name "${PREFIX}/CLOUDFLARE_TUNNEL_TOKEN" \
+      --value "$CF_TUNNEL_TOKEN" \
+      --type "SecureString" \
+      --overwrite \
+      --region "$AWS_REGION"
+
+    # Simpan Cloudflare Tunnel Token ke .env lokal
+    if [ -f "$ENV_FILE" ]; then
+        if ! grep -q "^CLOUDFLARE_TUNNEL_TOKEN=" "$ENV_FILE"; then
+            echo "CLOUDFLARE_TUNNEL_TOKEN=\"${CF_TUNNEL_TOKEN}\"" >> "$ENV_FILE"
+        else
+            sed -i "s/^CLOUDFLARE_TUNNEL_TOKEN=.*/CLOUDFLARE_TUNNEL_TOKEN=\"${CF_TUNNEL_TOKEN}\"/g" "$ENV_FILE"
+        fi
+    else
+        mkdir -p "$(dirname "$ENV_FILE")"
+        echo "CLOUDFLARE_TUNNEL_TOKEN=\"${CF_TUNNEL_TOKEN}\"" > "$ENV_FILE"
+    fi
+fi
 
 echo "SUCCESS: Kredensial berhasil didaftarkan di SSM Parameter Store."
 
