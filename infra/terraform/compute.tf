@@ -30,6 +30,11 @@ resource "aws_iam_instance_profile" "applayer" {
   role = aws_iam_role.applayer.name
 }
 
+resource "aws_iam_role_policy_attachment" "applayer_ssm" {
+  role       = aws_iam_role.applayer.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
 # Single Custom Inline Policy - Menerapkan "Principle of Least Privilege"
 resource "aws_iam_role_policy" "least_privilege" {
   name = "${var.project_name}-${var.environment}-least-privilege-policy"
@@ -150,8 +155,11 @@ resource "aws_instance" "applayer" {
                   tailscale up --authkey="$TS_KEY" --accept-routes --accept-dns=true
               fi
 
-              # 5. Install Certbot & Cloudflare DNS Plugin untuk SSL
-              dnf install -y certbot python3-certbot-dns-cloudflare
+              # 5. Install Certbot & Cloudflare DNS Plugin untuk SSL (AL2023 pip method)
+              python3 -m venv /opt/certbot
+              /opt/certbot/bin/pip install --upgrade pip
+              /opt/certbot/bin/pip install certbot certbot-dns-cloudflare
+              ln -sf /opt/certbot/bin/certbot /usr/bin/certbot
 
               # Ambil Cloudflare Token dari SSM dan terbitkan sertifikat SSL
               CF_TOKEN=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/CLOUDFLARE_API_TOKEN" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text || echo "")
