@@ -75,4 +75,27 @@ echo "-> Syncing provisioning scripts and init.sql to s3://${S3_BUCKET}/scripts/
 aws s3 cp "${PROJECT_DIR}/infra/scripts/" "s3://${S3_BUCKET}/scripts/" --recursive
 aws s3 cp "${PROJECT_DIR}/db/init.sql" "s3://${S3_BUCKET}/scripts/init.sql"
 
+# 8. Fetch database secrets from SSM and upload to S3 for private database nodes
+echo "-> Fetching DB credentials from SSM for private nodes..."
+DB_NAME=$(aws ssm get-parameter --name "/iot-bigdata/staging/POSTGRES_DB" --region ap-southeast-1 --query "Parameter.Value" --output text || echo "")
+DB_USER=$(aws ssm get-parameter --name "/iot-bigdata/staging/POSTGRES_USER" --region ap-southeast-1 --query "Parameter.Value" --output text || echo "")
+DB_PASSWORD=$(aws ssm get-parameter --name "/iot-bigdata/staging/POSTGRES_PASSWORD" --with-decryption --region ap-southeast-1 --query "Parameter.Value" --output text || echo "")
+
+if [ ! -z "$DB_PASSWORD" ]; then
+    echo "-> Creating temporary db-secrets.env file..."
+    TEMP_DB_ENV=$(mktemp)
+    cat <<EOF > "$TEMP_DB_ENV"
+POSTGRES_DB="$DB_NAME"
+POSTGRES_USER="$DB_USER"
+POSTGRES_PASSWORD="$DB_PASSWORD"
+EOF
+    chmod 600 "$TEMP_DB_ENV"
+
+    echo "-> Syncing DB credentials to s3://${S3_BUCKET}/secrets/db-secrets.env ..."
+    aws s3 cp "$TEMP_DB_ENV" "s3://${S3_BUCKET}/secrets/db-secrets.env"
+    rm -f "$TEMP_DB_ENV"
+else
+    echo "WARNING: Failed to fetch database credentials from SSM. S3 database configuration step skipped."
+fi
+
 echo "=== Package & Script Sync to S3 Completed successfully ==="

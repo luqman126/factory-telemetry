@@ -242,17 +242,23 @@ resource "aws_instance" "datalayer_primary" {
               aws s3 cp s3://${var.project_name}-datalake-${var.environment}/packages/ /home/ec2-user/ --recursive --exclude "*" --include "*.rpm" --region ${var.aws_region}
               aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/db-pkg/ --recursive --region ${var.aws_region}
 
-              # 4. Ambil parameter DB dari SSM
-              DB_NAME=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/POSTGRES_DB" --region ${var.aws_region} --query "Parameter.Value" --output text)
-              DB_USER=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/POSTGRES_USER" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text)
-              DB_PASSWORD=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/POSTGRES_PASSWORD" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text)
+              # 4. Ambil parameter DB dari file rahasia di S3
+              until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env; do
+                  echo "Waiting for DB secrets in S3..."
+                  sleep 10
+              done
+              aws s3 cp s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env /tmp/db-secrets.env
+              chmod 600 /tmp/db-secrets.env
+              source /tmp/db-secrets.env
+              rm -f /tmp/db-secrets.env
+
               REPLICA_IP="${cidrhost(var.private_subnet_cidr, 20)}"
 
               # 5. Jalankan provisioning primary
               chmod +x /home/ec2-user/db-pkg/provision-db-primary.sh
               cp /home/ec2-user/db-pkg/init.sql /tmp/init.sql || true
               cd /home/ec2-user/db-pkg
-              ./provision-db-primary.sh "\$DB_NAME" "\$DB_USER" "\$DB_PASSWORD" "\$REPLICA_IP"
+              ./provision-db-primary.sh "\$POSTGRES_DB" "\$POSTGRES_USER" "\$POSTGRES_PASSWORD" "\$REPLICA_IP"
               EOF
 
   root_block_device {
@@ -301,9 +307,17 @@ resource "aws_instance" "datalayer_replica" {
               aws s3 cp s3://${var.project_name}-datalake-${var.environment}/packages/ /home/ec2-user/ --recursive --exclude "*" --include "*.rpm" --region ${var.aws_region}
               aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/db-pkg/ --recursive --region ${var.aws_region}
 
-              # 4. Ambil parameter DB dari SSM
+              # 4. Ambil parameter DB dari file rahasia di S3
+              until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env; do
+                  echo "Waiting for DB secrets in S3..."
+                  sleep 10
+              done
+              aws s3 cp s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env /tmp/db-secrets.env
+              chmod 600 /tmp/db-secrets.env
+              source /tmp/db-secrets.env
+              rm -f /tmp/db-secrets.env
+
               PRIMARY_IP="${cidrhost(var.private_subnet_cidr, 10)}"
-              DB_PASSWORD=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/POSTGRES_PASSWORD" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text)
 
               # 5. Tunggu hingga primary DB port 5432 aktif sebelum running replica script
               until timeout 3 bash -c "cat < /dev/null > /dev/tcp/\$PRIMARY_IP/5432" 2>/dev/null; do
@@ -314,7 +328,7 @@ resource "aws_instance" "datalayer_replica" {
               # 6. Jalankan provisioning replica
               chmod +x /home/ec2-user/db-pkg/provision-db-replica.sh
               cd /home/ec2-user/db-pkg
-              ./provision-db-replica.sh "\$PRIMARY_IP" "\$DB_PASSWORD"
+              ./provision-db-replica.sh "\$PRIMARY_IP" "\$POSTGRES_PASSWORD"
               EOF
 
   root_block_device {
