@@ -28,16 +28,14 @@ postgresql-setup --initdb
 
 echo "=== [2/7] Installing TimescaleDB ==="
 if rpm -q timescaledb-2-postgresql-16 >/dev/null 2>&1; then
-    echo "TimescaleDB is already installed. Skipping repository setup."
+    echo "TimescaleDB is already installed."
+elif ls /home/ec2-user/timescaledb-2-postgresql-16-*.rpm >/dev/null 2>&1; then
+    echo "Installing TimescaleDB from local RPM..."
+    dnf localinstall -y /home/ec2-user/timescaledb-2-postgresql-16-*.rpm
 else
-    cat > /etc/yum.repos.d/timescaledb.repo <<'EOF'
-[timescaledb]
-name=TimescaleDB
-baseurl=https://packagecloud.io/timescale/timescaledb/el/9/$basearch
-gpgcheck=0
-enabled=1
-EOF
-    dnf install -y timescaledb-2-postgresql-16
+    echo "ERROR: Local TimescaleDB RPM not found at /home/ec2-user/." >&2
+    echo "Please download the RPM on bastion and copy it here first." >&2
+    exit 1
 fi
 
 echo "=== [3/7] Fixing TimescaleDB paths (Amazon Linux 2023 compatibility) ==="
