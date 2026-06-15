@@ -23,6 +23,7 @@ PRIMARY_IP="$1"
 DB_PASSWORD="$2"
 
 echo "=== [1/6] Installing PostgreSQL 16 ==="
+rm -f /etc/yum.repos.d/timescaledb.repo
 dnf install -y postgresql16-server postgresql16-contrib postgresql16-server-devel
 
 echo "=== [2/6] Installing TimescaleDB ==="

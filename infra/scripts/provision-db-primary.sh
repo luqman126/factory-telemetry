@@ -23,6 +23,7 @@ DB_PASSWORD="$3"
 REPLICA_IP="$4"
 
 echo "=== [1/7] Installing PostgreSQL 16 ==="
+rm -f /etc/yum.repos.d/timescaledb.repo
 dnf install -y postgresql16-server postgresql16-contrib postgresql16-server-devel
 PGDATA="/var/lib/pgsql/data"
 if [ -d "$PGDATA" ] && [ "$(ls -A "$PGDATA")" ]; then
