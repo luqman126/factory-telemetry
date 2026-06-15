@@ -70,4 +70,9 @@ sudo dnf download --arch=x86_64 alloy -y
 echo "-> Syncing RPM packages to s3://${S3_BUCKET}/packages/ ..."
 aws s3 cp "$DOWNLOAD_DIR/" "s3://${S3_BUCKET}/packages/" --recursive --exclude "*" --include "*.rpm"
 
-echo "=== Package Sync to S3 Completed successfully ==="
+# 7. Upload provisioning scripts and schema to S3 bucket
+echo "-> Syncing provisioning scripts and init.sql to s3://${S3_BUCKET}/scripts/ ..."
+aws s3 cp "${PROJECT_DIR}/infra/scripts/" "s3://${S3_BUCKET}/scripts/" --recursive
+aws s3 cp "${PROJECT_DIR}/db/init.sql" "s3://${S3_BUCKET}/scripts/init.sql"
+
+echo "=== Package & Script Sync to S3 Completed successfully ==="

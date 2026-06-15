@@ -74,18 +74,9 @@ aws ssm put-parameter \
 
 echo "SUCCESS: Kredensial berhasil didaftarkan di SSM Parameter Store."
 
-# 5. Ambil nama S3 bucket dari Terraform
-S3_BUCKET=$(terraform -chdir="${TERRAFORM_DIR}" output -raw s3_bucket 2>/dev/null || echo "iot-bigdata-datalake-staging")
-
-# 6. Upload file scripts dan config database ke S3 agar bisa ditarik langsung oleh DB VM di private subnet
+# 5. Jalankan Sinkronisasi RPM, script, dan init.sql ke S3 di Bastion secara remote
 echo ""
-echo "-> Mengunggah script provisioning dan init.sql ke S3 bucket (${S3_BUCKET}/scripts/)..."
-aws s3 cp "${PROJECT_DIR}/infra/scripts/" "s3://${S3_BUCKET}/scripts/" --recursive --region "$AWS_REGION"
-aws s3 cp "${PROJECT_DIR}/db/init.sql" "s3://${S3_BUCKET}/scripts/init.sql" --region "$AWS_REGION"
-
-# 7. Jalankan Sinkronisasi RPM ke S3 di Bastion secara remote
-echo ""
-echo "-> Memicu sinkronisasi paket RPM database & Alloy ke S3 Bucket di Bastion..."
+echo "-> Memicu sinkronisasi paket RPM, script, dan init.sql ke S3 Bucket di Bastion..."
 # Gunakan SSH Agent forwarding agar bastion bisa scp/ssh jika dibutuhkan
 ssh -o StrictHostKeyChecking=no -A ec2-user@${BASTION_IP} "
   cd /home/ec2-user/iot-bigdata-project
