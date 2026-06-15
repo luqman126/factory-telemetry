@@ -64,7 +64,7 @@ fi
 cd "$PKG_DIR"
 rm -f alloy-*.rpm
 echo "-> Downloading Alloy package for x86_64..."
-sudo dnf download --releasever=9 --arch=x86_64 alloy -y
+sudo dnf download --arch=x86_64 alloy -y
 ALLOY_RPM=$(ls alloy-*.rpm | head -n 1)
 ALLOY_RPM_PATH="${PKG_DIR}/${ALLOY_RPM}"
 echo "Downloaded package: ${ALLOY_RPM_PATH}"
