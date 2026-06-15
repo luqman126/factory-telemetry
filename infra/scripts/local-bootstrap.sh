@@ -8,6 +8,14 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TERRAFORM_DIR="${PROJECT_DIR}/infra/terraform"
+ENV_FILE="${PROJECT_DIR}/infra/.env"
+
+if [ -f "$ENV_FILE" ]; then
+    # Load variables jika file .env lokal ada
+    set -a
+    source "$ENV_FILE"
+    set +a
+fi
 
 echo "============================================================"
 echo "         IoT Big Data - Local Setup Bootstrap Helper        "
@@ -24,13 +32,48 @@ if ! command -v terraform >/dev/null 2>&1; then
     exit 1
 fi
 
+# 1.5 Cek ssh-agent (Wajib untuk Agent Forwarding)
+if ! ssh-add -l >/dev/null 2>&1; then
+    echo "WARNING: ssh-agent belum aktif atau belum mendeteksi adanya SSH key."
+    echo "Script membutuhkan SSH Agent Forwarding (-A) agar Bastion bisa mengakses node privat."
+    echo "Silakan jalankan perintah ini terlebih dahulu jika koneksi gagal:"
+    echo "  eval \$(ssh-agent) && ssh-add ~/.ssh/iot-bigdata-key.pem"
+    echo ""
+    read -p "Apakah Anda ingin tetap mencoba melanjutkan? (y/n) [y]: " CONTINUE_SSH
+    CONTINUE_SSH="${CONTINUE_SSH:-y}"
+    if [ "$CONTINUE_SSH" != "y" ]; then
+        exit 1
+    fi
+fi
+
 # 2. Setup Bastion IP (Gunakan IP Tailscale agar bisa SSH lewat VPN)
 echo "-> Menentukan IP Bastion..."
-DEFAULT_BASTION_IP="100.127.104.77"
-read -p "Masukkan IP Bastion Host [Default: ${DEFAULT_BASTION_IP}]: " BASTION_IP
-BASTION_IP="${BASTION_IP:-$DEFAULT_BASTION_IP}"
+# Gunakan BASTION_TAILSCALE_IP dari .env jika ada
+if [ ! -z "${BASTION_TAILSCALE_IP:-}" ]; then
+    read -p "Masukkan IP Bastion Host [Default: ${BASTION_TAILSCALE_IP}]: " INPUT_IP
+    BASTION_IP="${INPUT_IP:-$BASTION_TAILSCALE_IP}"
+else
+    # Jika tidak ada di .env lokal, minta input manual
+    read -p "Masukkan IP Bastion Host (IP Tailscale Anda): " BASTION_IP
+    if [ -z "$BASTION_IP" ]; then
+        echo "ERROR: IP Bastion wajib diisi." >&2
+        exit 1
+    fi
+fi
 
 echo "Bastion IP yang digunakan: ${BASTION_IP}"
+
+# Simpan Bastion IP ke .env (ditolak dari Git/gitignore) agar awet dan ISO 27001 compliant
+if [ -f "$ENV_FILE" ]; then
+    if ! grep -q "^BASTION_TAILSCALE_IP=" "$ENV_FILE"; then
+        echo "BASTION_TAILSCALE_IP=\"${BASTION_IP}\"" >> "$ENV_FILE"
+    else
+        sed -i "s/^BASTION_TAILSCALE_IP=.*/BASTION_TAILSCALE_IP=\"${BASTION_IP}\"/g" "$ENV_FILE"
+    fi
+else
+    mkdir -p "$(dirname "$ENV_FILE")"
+    echo "BASTION_TAILSCALE_IP=\"${BASTION_IP}\"" > "$ENV_FILE"
+fi
 
 # 3. Minta input Kredensial & Secrets
 echo ""
