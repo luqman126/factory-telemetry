@@ -150,3 +150,26 @@ resource "aws_ssm_parameter" "telegram_chat_id_server" {
   value       = var.telegram_chat_id_server != "" ? var.telegram_chat_id_server : "dummy_chat_id"
   description = "Telegram chat ID for server health alarms"
 }
+
+# ---- External/Dynamic Credentials (Managed via local-bootstrap.sh) ----
+resource "aws_ssm_parameter" "cloudflare_api_token" {
+  name        = "/${var.project_name}/${var.environment}/CLOUDFLARE_API_TOKEN"
+  type        = "SecureString"
+  value       = "placeholder_do_not_delete"
+  description = "Cloudflare API token for Certbot DNS challenge"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+resource "aws_ssm_parameter" "tailscale_auth_key" {
+  name        = "/${var.project_name}/${var.environment}/TAILSCALE_AUTH_KEY"
+  type        = "SecureString"
+  value       = "placeholder_do_not_delete"
+  description = "Tailscale auth key for VPN registration"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}

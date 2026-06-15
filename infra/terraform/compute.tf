@@ -139,9 +139,38 @@ resource "aws_instance" "applayer" {
               echo 'export SPARK_HOME=/opt/spark' > /etc/profile.d/spark.sh
               echo 'export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin' >> /etc/profile.d/spark.sh
 
-              # 4. Install Tailscale
+              # 4. Install & Configure Tailscale
               curl -fsSL https://tailscale.com/install.sh | sh
               systemctl enable --now tailscaled
+
+              # Ambil Tailscale key dari SSM dan login secara otomatis
+              TS_KEY=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/TAILSCALE_AUTH_KEY" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text || echo "")
+              if [ ! -z "$TS_KEY" ] && [ "$TS_KEY" != "placeholder_do_not_delete" ]; then
+                  echo "-> Registering Tailscale with Auth Key..."
+                  tailscale up --authkey="$TS_KEY" --accept-routes --accept-dns=true
+              fi
+
+              # 5. Install Certbot & Cloudflare DNS Plugin untuk SSL
+              dnf install -y certbot python3-certbot-dns-cloudflare
+
+              # Ambil Cloudflare Token dari SSM dan terbitkan sertifikat SSL
+              CF_TOKEN=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/CLOUDFLARE_API_TOKEN" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text || echo "")
+              if [ ! -z "$CF_TOKEN" ] && [ "$CF_TOKEN" != "placeholder_do_not_delete" ]; then
+                  echo "-> Requesting Let's Encrypt SSL Cert via Certbot..."
+                  mkdir -p /etc/letsencrypt
+                  cat <<SEC > /etc/letsencrypt/cloudflare.ini
+dns_cloudflare_api_token = $CF_TOKEN
+SEC
+                  chmod 600 /etc/letsencrypt/cloudflare.ini
+                  
+                  # Jalankan Certbot DNS-01 challenge untuk domain staging
+                  certbot certonly --dns-cloudflare \
+                    --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
+                    -d "staging-mqtt.${var.domain_name}" \
+                    --email "admin@${var.domain_name}" \
+                    --agree-tos --no-eff-email \
+                    --non-interactive
+              fi
               EOF
 
   root_block_device {
@@ -169,15 +198,50 @@ resource "aws_eip" "applayer" {
 # ---- 3. EC2 Instance: Datalayer-1 (PostgreSQL DB Primary) ----
 # Ditempatkan di Private Subnet, menggunakan static IP untuk kemudahan replikasi
 resource "aws_instance" "datalayer_primary" {
-  ami           = var.ami_id
-  instance_type = var.datalayer_instance_type
-  subnet_id     = aws_subnet.private.id
-  key_name      = var.key_pair_name
-  private_ip    = cidrhost(var.private_subnet_cidr, 10) # Contoh: 10.1.2.10
+  ami                  = var.ami_id
+  instance_type        = var.datalayer_instance_type
+  subnet_id            = aws_subnet.private.id
+  key_name             = var.key_pair_name
+  private_ip           = cidrhost(var.private_subnet_cidr, 10) # Contoh: 10.1.2.10
+  iam_instance_profile = aws_iam_instance_profile.applayer.name
 
   vpc_security_group_ids = [
     aws_security_group.datalayer.id
   ]
+
+  user_data = <<-EOF
+              #!/bin/bash
+              # 1. Tunggu hingga RPM dan script tersedia di S3 (diunggah oleh local-bootstrap.sh)
+              until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/packages/ | grep -q '\.rpm'; do
+                  echo "Waiting for packages in S3..."
+                  sleep 10
+              done
+
+              until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/scripts/ | grep -q 'provision-db'; do
+                  echo "Waiting for scripts in S3..."
+                  sleep 10
+              done
+
+              # 2. Buat folder download
+              mkdir -p /home/ec2-user/db-pkg
+              cd /home/ec2-user
+
+              # 3. Tarik RPM dan script dari S3
+              aws s3 cp s3://${var.project_name}-datalake-${var.environment}/packages/ /home/ec2-user/ --recursive --exclude "*" --include "*.rpm" --region ${var.aws_region}
+              aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/db-pkg/ --recursive --region ${var.aws_region}
+
+              # 4. Ambil parameter DB dari SSM
+              DB_NAME=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/POSTGRES_DB" --region ${var.aws_region} --query "Parameter.Value" --output text)
+              DB_USER=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/POSTGRES_USER" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text)
+              DB_PASSWORD=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/POSTGRES_PASSWORD" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text)
+              REPLICA_IP="${cidrhost(var.private_subnet_cidr, 20)}"
+
+              # 5. Jalankan provisioning primary
+              chmod +x /home/ec2-user/db-pkg/provision-db-primary.sh
+              cp /home/ec2-user/db-pkg/init.sql /tmp/init.sql || true
+              cd /home/ec2-user/db-pkg
+              ./provision-db-primary.sh "\$DB_NAME" "\$DB_USER" "\$DB_PASSWORD" "\$REPLICA_IP"
+              EOF
 
   root_block_device {
     volume_size           = var.ebs_volume_size
@@ -193,15 +257,53 @@ resource "aws_instance" "datalayer_primary" {
 # ---- 4. EC2 Instance: Datalayer-2 (PostgreSQL DB Replica) ----
 # Ditempatkan di Private Subnet, menggunakan static IP
 resource "aws_instance" "datalayer_replica" {
-  ami           = var.ami_id
-  instance_type = var.datalayer_instance_type
-  subnet_id     = aws_subnet.private.id
-  key_name      = var.key_pair_name
-  private_ip    = cidrhost(var.private_subnet_cidr, 20) # Contoh: 10.1.2.20
+  ami                  = var.ami_id
+  instance_type        = var.datalayer_instance_type
+  subnet_id            = aws_subnet.private.id
+  key_name             = var.key_pair_name
+  private_ip           = cidrhost(var.private_subnet_cidr, 20) # Contoh: 10.1.2.20
+  iam_instance_profile = aws_iam_instance_profile.applayer.name
 
   vpc_security_group_ids = [
     aws_security_group.datalayer.id
   ]
+
+  user_data = <<-EOF
+              #!/bin/bash
+              # 1. Tunggu hingga RPM dan script tersedia di S3
+              until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/packages/ | grep -q '\.rpm'; do
+                  echo "Waiting for packages in S3..."
+                  sleep 10
+              done
+
+              until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/scripts/ | grep -q 'provision-db'; do
+                  echo "Waiting for scripts in S3..."
+                  sleep 10
+              done
+
+              # 2. Buat folder download
+              mkdir -p /home/ec2-user/db-pkg
+              cd /home/ec2-user
+
+              # 3. Tarik RPM dan script dari S3
+              aws s3 cp s3://${var.project_name}-datalake-${var.environment}/packages/ /home/ec2-user/ --recursive --exclude "*" --include "*.rpm" --region ${var.aws_region}
+              aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/db-pkg/ --recursive --region ${var.aws_region}
+
+              # 4. Ambil parameter DB dari SSM
+              PRIMARY_IP="${cidrhost(var.private_subnet_cidr, 10)}"
+              DB_PASSWORD=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/POSTGRES_PASSWORD" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text)
+
+              # 5. Tunggu hingga primary DB port 5432 aktif sebelum running replica script
+              until timeout 3 bash -c "cat < /dev/null > /dev/tcp/\$PRIMARY_IP/5432" 2>/dev/null; do
+                  echo "Waiting for primary database at \$PRIMARY_IP..."
+                  sleep 5
+              done
+
+              # 6. Jalankan provisioning replica
+              chmod +x /home/ec2-user/db-pkg/provision-db-replica.sh
+              cd /home/ec2-user/db-pkg
+              ./provision-db-replica.sh "\$PRIMARY_IP" "\$DB_PASSWORD"
+              EOF
 
   root_block_device {
     volume_size           = var.ebs_volume_size

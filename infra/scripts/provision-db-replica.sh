@@ -47,16 +47,23 @@ ln -sf /usr/lib64/timescaledb-pg16/timescaledb--*.sql /usr/share/pgsql/extension
 echo "=== [4/6] Base backup from primary ==="
 PGDATA="/var/lib/pgsql/data"
 
-# Remove default data dir (initdb not needed for replica)
-rm -rf "$PGDATA"
-
-# pg_basebackup from primary
-PGPASSWORD="$DB_PASSWORD" pg_basebackup \
-    -h "$PRIMARY_IP" \
-    -U replicator \
-    -D "$PGDATA" \
-    -Fp -Xs -P -R \
-    -S node3_replica_slot
+# pg_basebackup from primary with retry loop to handle startup race conditions
+echo "-> Performing base backup from primary..."
+for i in {1..30}; do
+    rm -rf "$PGDATA"
+    if PGPASSWORD="$DB_PASSWORD" pg_basebackup \
+        -h "$PRIMARY_IP" \
+        -U replicator \
+        -D "$PGDATA" \
+        -Fp -Xs -P -R \
+        -S node3_replica_slot; then
+        echo "Base backup completed successfully!"
+        break
+    else
+        echo "Backup attempt $i failed (primary might not be fully ready), retrying in 10 seconds..."
+        sleep 10
+    fi
+done
 
 chown -R postgres:postgres "$PGDATA"
 chmod 700 "$PGDATA"

@@ -18,6 +18,11 @@ output "private_subnet_id" {
   value       = aws_subnet.private.id
 }
 
+output "s3_bucket" {
+  description = "Nama S3 Bucket Data Lake"
+  value       = aws_s3_bucket.datalake.id
+}
+
 output "applayer_public_ip" {
   description = "Public IP dari applayer (Bastion Host)"
   value       = aws_eip.applayer.public_ip

@@ -23,6 +23,12 @@ variable "project_name" {
   default     = "iot-bigdata"
 }
 
+variable "domain_name" {
+  description = "Domain name untuk SSL cert dan DNS"
+  type        = string
+  default     = "chescloud.my.id"
+}
+
 # ---- Network ----
 variable "vpc_cidr" {
   description = "CIDR block untuk VPC"
