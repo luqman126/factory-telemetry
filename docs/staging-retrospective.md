@@ -298,6 +298,16 @@ This phase had the **most failures** — 7 distinct issues.
 * **Fix**: Updated the config file to point to the staging Prometheus URL. Also added comments documenting both staging and production URLs.
 * **Automation Status**: ⚠️ Manual per-server. The config file in the repo is a template that must be customized per environment. **Needs**: Environment-aware config generation (e.g., sed replacement during deployment).
 
+### Failure #20.5: Alloy pg_up = 0 (Ident Authentication Failed)
+
+* **Error**:
+  ```text
+  ts=2026-06-15T11:22:05.450745111Z level=error msg="Error opening connection to database" component_path=/ component_id=prometheus.exporter.postgres.postgres_metrics err="error querying postgresql version: pq: Ident authentication failed for user \"kagebyo\" (28000)"
+  ```
+* **Root Cause**: The default `pg_hba.conf` in Amazon Linux 2023's PostgreSQL 16 installation has local TCP connection rules (`127.0.0.1/32` and `::1/128`) configured to use `ident` authentication. Because `pg_hba.conf` is evaluated sequentially from top to bottom, these rules matched the localhost connections from Grafana Alloy before our appended custom `scram-sha-256` rules could be reached, causing connection failures.
+* **Fix**: Modified `pg_hba.conf` to use `scram-sha-256` for the default localhost TCP connection rules, and updated `provision-db-primary.sh` to do this programmatically via `sed` before appending custom rules.
+* **Automation Status**: ✅ Fixed in `provision-db-primary.sh`.
+
 ---
 
 ## 9. Phase 8: Spark Analytics Pipeline
@@ -384,8 +394,9 @@ This phase had the **most failures** — 7 distinct issues.
 | 22 | Spark | PySpark build: no space on `/tmp` | tmpfs size limit (957 MB) | Set custom `TMPDIR` in CI/CD pipeline | ✅ |
 | 23 | Spark | `JAVA_HOME is not set` in systemd | Systemd strips env vars | Dynamic detection in pipeline script | ✅ |
 | 24 | Spark | Java 21 not installed | Not in Terraform bootstrap | Added to `compute.tf` user_data | ✅ |
+| 25 | Monitoring | Alloy pg_up = 0 (Ident Auth Failed) | Default pg_hba.conf uses `ident` for localhost | Changed defaults to `scram-sha-256` in `provision-db-primary.sh` | ✅ |
 
-**Score**: 22/24 fully automated (✅), 2/24 still require manual intervention (⚠️).
+**Score**: 23/25 fully automated (✅), 2/25 still require manual intervention (⚠️).
 
 ---
 

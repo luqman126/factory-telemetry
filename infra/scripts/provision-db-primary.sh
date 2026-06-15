@@ -75,6 +75,10 @@ wal_keep_size = 256MB
 listen_addresses = '*'
 EOF
 
+# Ganti metode otentikasi ident default ke scram-sha-256 untuk TCP localhost agar Alloy bisa connect
+sed -i -E 's/(127\.0\.0\.1\/32\s+)ident/\1scram-sha-256/g' "$PGDATA/pg_hba.conf"
+sed -i -E 's/(::1\/128\s+)ident/\1scram-sha-256/g' "$PGDATA/pg_hba.conf"
+
 LOCAL_PREFIX=$(hostname -I | awk '{print $1}' | cut -d. -f1,2)
 
 cat >> "$PGDATA/pg_hba.conf" <<EOF
