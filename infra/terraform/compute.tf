@@ -133,6 +133,12 @@ resource "aws_instance" "applayer" {
               curl -SL https://github.com/docker/compose/releases/download/v2.26.1/docker-compose-linux-x86_64 -o /usr/libexec/docker/cli-plugins/docker-compose
               chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
+              # 2.5 Tarik provisioning scripts dari S3 agar folder scripts lokal di Bastion langsung terisi lengkap
+              mkdir -p /home/ec2-user/iot-bigdata-project/infra/scripts
+              aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/iot-bigdata-project/infra/scripts/ --recursive --region ${var.aws_region}
+              chmod +x /home/ec2-user/iot-bigdata-project/infra/scripts/*.sh
+              chown -R ec2-user:ec2-user /home/ec2-user/iot-bigdata-project
+
               # 3. Install & configure Spark 3.5.8
               cd /opt
               curl -SL https://dlcdn.apache.org/spark/spark-3.5.8/spark-3.5.8-bin-hadoop3.tgz -o spark-3.5.8-bin-hadoop3.tgz
