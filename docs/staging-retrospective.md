@@ -479,7 +479,35 @@ GitHub Actions Workflow
     └── Confirm timer is active
 ```
 
+## 13. Troubleshooting: TimescaleDB Offline Installation in Private Subnets
+
+During database provisioning on `datalayer-1` and `datalayer-2`, several network and package manager constraints were identified and resolved:
+
+### A. Private Subnet Connection Timeout
+* **Issue**: The database nodes are placed in a private subnet with no internet access (no NAT Gateway). Running `dnf install` directly on those nodes attempts to fetch metadata and RPMs from `packagecloud.io`, causing connection timeouts.
+* **Resolution**: 
+  1. Add the `timescaledb` repository on the bastion (`applayer-1`), which has public internet access.
+  2. Download the TimescaleDB packages (the main package `timescaledb-2-postgresql-16`, the loader `timescaledb-2-loader-postgresql-16`, and `timescaledb-tools`) locally on the bastion using `dnf download`.
+  3. Copy the RPM files via `scp` to the database nodes.
+  4. Perform a local installation on the database nodes using `dnf localinstall -y /home/ec2-user/timescaledb-*.rpm`.
+* **Important**: If the database nodes contain a leftover `/etc/yum.repos.d/timescaledb.repo` pointing to `packagecloud.io`, DNF will attempt to refresh its metadata and fail. The provisioning scripts automatically clean up this repo file before installing.
+
+### B. Bastion Repository Shell Escaping
+* **Issue**: Creating the `timescaledb.repo` on the bastion using heredocs inside a `sudo sh -c` wrapper can inadvertently expand `$basearch` to an empty string, breaking the DNF download URL.
+* **Resolution**: Use `sudo tee` with a quoted heredoc `<<'EOF'` to write the repository file exactly as is, preventing local shell expansion of `$basearch`.
+
+### C. Harmless RPM `%post` Scriptlet Warnings
+* **Issue**: During `dnf localinstall` on `datalayer-1`, the following warning occurs:
+  ```text
+  Using pg_config located at /usr/pgsql-16/bin/pg_config to finish installation...
+  ERROR: Could not find pg_config, expected it at /usr/pgsql-16/bin/pg_config. Please fix and try again.
+  warning: %post(timescaledb-2-postgresql-16-...) scriptlet failed, exit status 1
+  ```
+* **Explanation**: The TimescaleDB RPM (built for RHEL/PGDG) expects `pg_config` at `/usr/pgsql-16/bin/pg_config`. However, Amazon Linux 2023's native PostgreSQL package places `pg_config` at `/usr/bin/pg_config`. 
+* **Impact**: **Harmless**. The RPM successfully extracts the binary `.so` and extension files. The script manually fixes the paths in Step 3/7 (symlinking extensions to standard AL2023 paths) and updates `postgresql.conf` in Step 4/7, making this warning completely safe to ignore.
+
 ---
+
 
 ## Conclusion
 
