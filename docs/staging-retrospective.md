@@ -31,8 +31,8 @@ This document exhaustively records **every failure, error, and manual fix** enco
 ## 1. Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  VPC 10.1.0.0/16 (Staging)    vs    VPC 10.0.0.0/16 (Prod)     │
+┌──────────────────────────────────────────────────────────────────┐
+│  VPC 10.1.0.0/16 (Staging)    vs    VPC 10.0.0.0/16 (Prod)       |
 │                                                                  │
 │  Public Subnet 10.1.1.0/24                                       │
 │  ├── applayer-1 (10.1.1.208)                                     │
@@ -41,13 +41,13 @@ This document exhaustively records **every failure, error, and manual fix** enco
 │  │   ├── Spark Master + Local Mode                               │
 │  │   ├── Grafana Alloy (node metrics)                            │
 │  │   └── Cloudflare Tunnel → grafana-staging.chescloud.my.id     │
-│  │                                                                │
+│  │                                                               |
 │  Private Subnet 10.1.2.0/24                                      │
 │  ├── datalayer-1 (10.1.2.10) — PostgreSQL Primary + TimescaleDB  │
 │  │   └── Grafana Alloy (node + postgres metrics)                 │
 │  └── datalayer-2 (10.1.2.20) — PostgreSQL Replica                │
 │      └── Grafana Alloy (node + postgres metrics)                 │
-└─────────────────────────────────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -373,19 +373,19 @@ This phase had the **most failures** — 7 distinct issues.
 | 11 | Database | Replica also rejects connections | Same hardcoded CIDR on replica | Same dynamic prefix fix | ✅ |
 | 12 | Backend | Venv interpreter mismatch | Rsync'd Ubuntu venv to AL2023 | Exclude venvs, build natively | ✅ |
 | 13 | Backend | Python 3.12 not installed | Not in base AMI | Added to compute.tf user_data | ✅ |
-| 14 | Backend | Wrong `POSTGRES_DB` in `.env` | Manual config error | Manually corrected `.env` | ⚠️ |
+| 14 | Backend | Wrong `POSTGRES_DB` in `.env` | Manual config error | Auto-fetched from SSM Parameter Store | ✅ |
 | 15 | Grafana | Login rejected despite correct `.env` | Credentials only applied on first boot | Reset via `grafana cli` | ✅ |
 | 16 | Grafana | PostgreSQL panels "No Data" | Hardcoded `datname="iot_db"` | Changed to regex `(staging_)?iot_db` | ✅ |
-| 17 | Alloy | Package not found via dnf | Grafana repo not configured | Manually configured repo | ⚠️ |
-| 18 | Alloy | Architecture mismatch (aarch64) | Wrong arch from repo | Specified x86_64 explicitly | ⚠️ |
+| 17 | Alloy | Package not found via dnf | Grafana repo not configured | Auto-downloaded and localinstalled via script | ✅ |
+| 18 | Alloy | Architecture mismatch (aarch64) | Wrong arch from repo | Pinned x86_64 in setup script | ✅ |
 | 19 | Alloy | `pg_ls_waldir` permission denied | Missing `pg_monitor` role | Added to provision-db-primary.sh | ✅ |
-| 20 | Alloy | Config points to production Prometheus | Hardcoded production IP | Updated to staging IP | ⚠️ |
+| 20 | Alloy | Config points to production Prometheus | Hardcoded production IP | Rendered dynamically from template | ✅ |
 | 21 | Spark | Timer/service not deployed by CI/CD | Missing from deploy script | Added to `deploy-staging.yml` | ✅ |
 | 22 | Spark | PySpark build: no space on `/tmp` | tmpfs size limit (957 MB) | Set custom `TMPDIR` in CI/CD pipeline | ✅ |
 | 23 | Spark | `JAVA_HOME is not set` in systemd | Systemd strips env vars | Dynamic detection in pipeline script | ✅ |
 | 24 | Spark | Java 21 not installed | Not in Terraform bootstrap | Added to `compute.tf` user_data | ✅ |
 
-**Score**: 18/24 fully automated (✅), 6/24 still require manual intervention (⚠️).
+**Score**: 22/24 fully automated (✅), 2/24 still require manual intervention (⚠️).
 
 ---
 
@@ -429,10 +429,10 @@ These can be implemented immediately by extending existing scripts:
 
 | Item | Current State | Target State | How |
 |------|--------------|--------------|-----|
-| Secrets management | Manual `.env` file | Fetched from cloud | Use AWS SSM Parameter Store; fetch in `user_data` or systemd `ExecStartPre` |
-| Alloy config per-node | Manual edit per server | Template-based | Use `sed` replacement in provisioning script with hostname detection |
-| TimescaleDB + Alloy RPMs | Bastion download + scp | Pre-baked AMI | Build a custom AMI with all packages pre-installed using Packer |
-| Config.alloy environment detection | Hardcoded IPs | Dynamic | Detect local IP prefix and set Prometheus URL automatically |
+| Secrets management | Manual `.env` file | Fetched from cloud | ✅ Auto-fetched from SSM Parameter Store via fetch-secrets.sh |
+| Alloy config per-node | Manual edit per server | Template-based | ✅ Automated via setup-alloy-nodes.sh using Python template renderer |
+| TimescaleDB + Alloy RPMs | Bastion download + scp | Pre-baked AMI | ⚠️ TimescaleDB manual; Alloy automated via setup-alloy-nodes.sh localinstall |
+| Config.alloy environment detection | Hardcoded IPs | Dynamic | ✅ Dynamic IP suffix and local IP resolution in render script |
 
 ### Tier 3: Full Automation (Significant effort)
 

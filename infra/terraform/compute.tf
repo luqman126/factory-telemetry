@@ -72,6 +72,27 @@ resource "aws_iam_role_policy" "least_privilege" {
           "s3:DeleteObject"
         ]
         Resource = "arn:aws:s3:::${var.project_name}-datalake-*/*"
+      },
+      # 4. SECRETS MANAGEMENT: Hanya izinkan membaca secrets untuk environment ini dari SSM
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameters",
+          "ssm:GetParameter",
+          "ssm:GetParametersByPath"
+        ]
+        Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/${var.project_name}/${var.environment}/*"
+      },
+      # 5. KMS DECRYPT: Diperlukan untuk mendekripsi SSM SecureString parameters
+      {
+        Effect   = "Allow"
+        Action   = "kms:Decrypt"
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "ssm.${var.aws_region}.amazonaws.com"
+          }
+        }
       }
     ]
   })

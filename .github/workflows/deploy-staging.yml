@@ -41,6 +41,12 @@ jobs:
             --exclude '*/__pycache__/' \
             ./ ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }}:/home/ec2-user/iot-bigdata-project/
 
+      - name: Copy Temporary Deploy Key to Bastion
+        run: |
+          echo "-> Copying SSH Key to Bastion for DB access..."
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ~/.ssh/id_rsa ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }}:/home/ec2-user/tmp-key.pem
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} "chmod 600 /home/ec2-user/tmp-key.pem"
+
       - name: Restart Services via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -51,6 +57,11 @@ jobs:
           script: |
             echo "=== MENJALANKAN POST-DEPLOYMENT SETUP ==="
             cd /home/ec2-user/iot-bigdata-project
+
+            # 0. Fetch Secrets dari SSM Parameter Store ke .env
+            echo "-> Fetching environment secrets from AWS SSM..."
+            chmod +x infra/scripts/fetch-secrets.sh
+            ./infra/scripts/fetch-secrets.sh staging
 
             # 1. Inisialisasi python virtual environment jika belum ada
             if [ ! -d "backend/.venv" ]; then
@@ -131,6 +142,12 @@ jobs:
 
             docker compose up -d --build
 
+            # 4b. Setup Grafana Alloy monitoring agents across nodes
+            echo "-> Setting up Grafana Alloy monitoring agents..."
+            cd /home/ec2-user/iot-bigdata-project
+            chmod +x infra/scripts/setup-alloy-nodes.sh
+            ./infra/scripts/setup-alloy-nodes.sh
+
             # 5. Cek Status Service
             echo "-> Checking backend status..."
             sudo systemctl status iot-backend --no-pager -l
@@ -140,3 +157,9 @@ jobs:
             sudo systemctl list-timers --all | grep iot-analytics || true
 
             echo "=== DEPLOYMENT STAGING SELESAI ==="
+
+      - name: Clean Up Temporary Deploy Key from Bastion
+        if: always()
+        run: |
+          echo "-> Cleaning up SSH Key from Bastion..."
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} "rm -f /home/ec2-user/tmp-key.pem"

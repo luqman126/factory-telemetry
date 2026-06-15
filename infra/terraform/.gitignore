@@ -9,9 +9,11 @@
 crash.log
 crash.*.log
 
-# Exclude all variable files that might contain secrets (except staging.tfvars which contains public variables)
+# Exclude all variable files that might contain secrets
+# (except staging.tfvars and example files which are safe to commit)
 *.tfvars
 !environments/staging.tfvars
+!secrets.auto.tfvars.example
 
 # Ignore override files
 override.tf

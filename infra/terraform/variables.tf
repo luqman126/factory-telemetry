@@ -82,3 +82,77 @@ variable "ebs_volume_size" {
   type        = number
   default     = 30
 }
+
+# ---- Database Credentials ----
+# Semua nilai wajib disuplai via secrets.auto.tfvars atau TF_VAR_xxx
+# Tidak ada default hardcode untuk mematuhi prinsip ISO 27001 (credential non-disclosure)
+variable "db_name" {
+  description = "Nama database PostgreSQL"
+  type        = string
+}
+
+variable "db_user" {
+  description = "Username PostgreSQL"
+  type        = string
+  sensitive   = true
+}
+
+variable "db_password" {
+  description = "Password PostgreSQL"
+  type        = string
+  sensitive   = true
+}
+
+# ---- MQTT Credentials ----
+variable "mqtt_user" {
+  description = "Username MQTT broker"
+  type        = string
+  sensitive   = true
+}
+
+variable "mqtt_password" {
+  description = "Password MQTT broker"
+  type        = string
+  sensitive   = true
+}
+
+# ---- Grafana Credentials ----
+variable "grafana_admin_user" {
+  description = "Username Admin Grafana"
+  type        = string
+  sensitive   = true
+}
+
+variable "grafana_admin_password" {
+  description = "Password Admin Grafana"
+  type        = string
+  sensitive   = true
+}
+
+# ---- Telegram Configs ----
+variable "telegram_bot_token_iot" {
+  description = "Telegram Bot Token untuk alert IoT"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "telegram_chat_id_iot" {
+  description = "Telegram Chat ID untuk alert IoT"
+  type        = string
+  default     = ""
+}
+
+variable "telegram_bot_token_server" {
+  description = "Telegram Bot Token untuk alert Server"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "telegram_chat_id_server" {
+  description = "Telegram Chat ID untuk alert Server"
+  type        = string
+  default     = ""
+}
+

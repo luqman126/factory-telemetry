@@ -1,0 +1,47 @@
+// ============================================================
+// config.alloy.template
+// Grafana Alloy Configuration Template for IoT Big Data Nodes
+// Generated dynamically by setup-alloy-nodes.sh
+// ============================================================
+
+// ------------------------------------------------------------
+// 1. INTEGRASI EXPORTER (Pengumpul Data)
+// ------------------------------------------------------------
+
+// Integrasi untuk mengumpulkan metrik sistem Host (CPU, RAM, Disk, Network)
+prometheus.exporter.unix "node_metrics" {
+  // Gunakan konfigurasi default
+}
+
+#POSTGRES_EXPORTER_BLOCK#
+
+// ------------------------------------------------------------
+// 2. SCRAPE JOBS (Proses Penarikan Data Exporter & Naming Instance)
+// ------------------------------------------------------------
+
+// Komponen relabel untuk penamaan instance agar tidak menggunakan default localhost
+prometheus.relabel "rename_instance" {
+  forward_to = [prometheus.remote_write.prometheus_server.receiver]
+  rule {
+    action       = "replace"
+    target_label = "instance"
+    replacement  = "#INSTANCE_NAME#"
+  }
+}
+
+// Menarik data metrik sistem host
+prometheus.scrape "scrape_node" {
+  targets    = prometheus.exporter.unix.node_metrics.targets
+  forward_to = [prometheus.relabel.rename_instance.receiver]
+}
+
+#POSTGRES_SCRAPE_BLOCK#
+
+// ------------------------------------------------------------
+// 3. REMOTE WRITE (Pengiriman Terpusat ke Prometheus di applayer-1)
+// ------------------------------------------------------------
+prometheus.remote_write "prometheus_server" {
+  endpoint {
+    url = "http://#PROMETHEUS_IP#:9090/api/v1/write"
+  }
+}
