@@ -24,6 +24,11 @@ REPLICA_IP="$4"
 
 echo "=== [1/7] Installing PostgreSQL 16 ==="
 dnf install -y postgresql16-server postgresql16-contrib postgresql16-server-devel
+PGDATA="/var/lib/pgsql/data"
+if [ -d "$PGDATA" ] && [ "$(ls -A "$PGDATA")" ]; then
+    echo "WARNING: $PGDATA is not empty. Cleaning it up for fresh initialization..."
+    rm -rf "${PGDATA:?}"/*
+fi
 postgresql-setup --initdb
 
 echo "=== [2/7] Installing TimescaleDB ==="
