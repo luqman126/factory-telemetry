@@ -117,87 +117,87 @@ resource "aws_instance" "applayer" {
   ]
 
   # Bootstrapping (Otomatisasi instalasi software saat pertama kali server menyala)
-  user_data = <<-EOF
-              #!/bin/bash
-              # 1. Update system & install package dasar
-              dnf update -y
-              dnf install -y git python3 python3-pip python3.12 java-21-amazon-corretto-devel
+  user_data = <<EOF
+#!/bin/bash
+# 1. Update system & install package dasar
+dnf update -y
+dnf install -y git python3 python3-pip python3.12 java-21-amazon-corretto-devel
 
-              # 2. Install & jalankan Docker + Docker Compose v2 (Standar AL2023)
-              dnf install -y docker
-              systemctl enable --now docker
-              usermod -aG docker ec2-user
+# 2. Install & jalankan Docker + Docker Compose v2 (Standar AL2023)
+dnf install -y docker
+systemctl enable --now docker
+usermod -aG docker ec2-user
 
-              # Download & install Docker Compose V2 secara manual karena tidak ada di repo AL2023
-              mkdir -p /usr/libexec/docker/cli-plugins
-              curl -SL https://github.com/docker/compose/releases/download/v2.26.1/docker-compose-linux-x86_64 -o /usr/libexec/docker/cli-plugins/docker-compose
-              chmod +x /usr/libexec/docker/cli-plugins/docker-compose
+# Download & install Docker Compose V2 secara manual karena tidak ada di repo AL2023
+mkdir -p /usr/libexec/docker/cli-plugins
+curl -SL https://github.com/docker/compose/releases/download/v2.26.1/docker-compose-linux-x86_64 -o /usr/libexec/docker/cli-plugins/docker-compose
+chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
-              # 2.5 Tarik provisioning scripts dari S3 agar folder scripts lokal di Bastion langsung terisi lengkap
-              mkdir -p /home/ec2-user/iot-bigdata-project/infra/scripts
-              aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/iot-bigdata-project/infra/scripts/ --recursive --region ${var.aws_region}
-              chmod +x /home/ec2-user/iot-bigdata-project/infra/scripts/*.sh
-              chown -R ec2-user:ec2-user /home/ec2-user/iot-bigdata-project
+# 2.5 Tarik provisioning scripts dari S3 agar folder scripts lokal di Bastion langsung terisi lengkap
+mkdir -p /home/ec2-user/iot-bigdata-project/infra/scripts
+aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/iot-bigdata-project/infra/scripts/ --recursive --region ${var.aws_region}
+chmod +x /home/ec2-user/iot-bigdata-project/infra/scripts/*.sh
+chown -R ec2-user:ec2-user /home/ec2-user/iot-bigdata-project
 
-              # 3. Install & configure Spark 3.5.8
-              cd /opt
-              curl -SL https://dlcdn.apache.org/spark/spark-3.5.8/spark-3.5.8-bin-hadoop3.tgz -o spark-3.5.8-bin-hadoop3.tgz
-              tar -xzf spark-3.5.8-bin-hadoop3.tgz
-              ln -sf /opt/spark-3.5.8-bin-hadoop3 /opt/spark
-              rm -f spark-3.5.8-bin-hadoop3.tgz
-              mkdir -p /opt/spark/logs /opt/spark/work
-              chown -R ec2-user:ec2-user /opt/spark-3.5.8-bin-hadoop3 /opt/spark/logs /opt/spark/work
-              echo 'export SPARK_HOME=/opt/spark' > /etc/profile.d/spark.sh
-              echo 'export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin' >> /etc/profile.d/spark.sh
+# 3. Install & configure Spark 3.5.8
+cd /opt
+curl -SL https://dlcdn.apache.org/spark/spark-3.5.8/spark-3.5.8-bin-hadoop3.tgz -o spark-3.5.8-bin-hadoop3.tgz
+tar -xzf spark-3.5.8-bin-hadoop3.tgz
+ln -sf /opt/spark-3.5.8-bin-hadoop3 /opt/spark
+rm -f spark-3.5.8-bin-hadoop3.tgz
+mkdir -p /opt/spark/logs /opt/spark/work
+chown -R ec2-user:ec2-user /opt/spark-3.5.8-bin-hadoop3 /opt/spark/logs /opt/spark/work
+echo 'export SPARK_HOME=/opt/spark' > /etc/profile.d/spark.sh
+echo 'export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin' >> /etc/profile.d/spark.sh
 
-              # 4. Install & Configure Tailscale
-              curl -fsSL https://tailscale.com/install.sh | sh
-              systemctl enable --now tailscaled
+# 4. Install & Configure Tailscale
+curl -fsSL https://tailscale.com/install.sh | sh
+systemctl enable --now tailscaled
 
-              # Ambil Tailscale key dari SSM dan login secara otomatis
-              TS_KEY=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/TAILSCALE_AUTH_KEY" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text || echo "")
-              if [ ! -z "$TS_KEY" ] && [ "$TS_KEY" != "placeholder_do_not_delete" ]; then
-                  echo "-> Registering Tailscale with Auth Key..."
-                  tailscale up --authkey="$TS_KEY" --accept-routes --accept-dns=true
-              fi
+# Ambil Tailscale key dari SSM dan login secara otomatis
+TS_KEY=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/TAILSCALE_AUTH_KEY" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text || echo "")
+if [ ! -z "$TS_KEY" ] && [ "$TS_KEY" != "placeholder_do_not_delete" ]; then
+    echo "-> Registering Tailscale with Auth Key..."
+    tailscale up --authkey="$TS_KEY" --accept-routes --accept-dns=true
+fi
 
-              # 5. Install Certbot & Cloudflare DNS Plugin untuk SSL (AL2023 pip method)
-              python3 -m venv /opt/certbot
-              /opt/certbot/bin/pip install --upgrade pip
-              /opt/certbot/bin/pip install certbot certbot-dns-cloudflare
-              ln -sf /opt/certbot/bin/certbot /usr/bin/certbot
+# 5. Install Certbot & Cloudflare DNS Plugin untuk SSL (AL2023 pip method)
+python3 -m venv /opt/certbot
+/opt/certbot/bin/pip install --upgrade pip
+/opt/certbot/bin/pip install certbot certbot-dns-cloudflare
+ln -sf /opt/certbot/bin/certbot /usr/bin/certbot
 
-              # Ambil Cloudflare Token dari SSM dan terbitkan sertifikat SSL
-              CF_TOKEN=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/CLOUDFLARE_API_TOKEN" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text || echo "")
-              if [ ! -z "$CF_TOKEN" ] && [ "$CF_TOKEN" != "placeholder_do_not_delete" ]; then
-                  echo "-> Requesting Let's Encrypt SSL Cert via Certbot..."
-                  mkdir -p /etc/letsencrypt
-                  cat <<SEC > /etc/letsencrypt/cloudflare.ini
+# Ambil Cloudflare Token dari SSM dan terbitkan sertifikat SSL
+CF_TOKEN=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/CLOUDFLARE_API_TOKEN" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text || echo "")
+if [ ! -z "$CF_TOKEN" ] && [ "$CF_TOKEN" != "placeholder_do_not_delete" ]; then
+    echo "-> Requesting Let's Encrypt SSL Cert via Certbot..."
+    mkdir -p /etc/letsencrypt
+    cat <<SEC > /etc/letsencrypt/cloudflare.ini
 dns_cloudflare_api_token = $CF_TOKEN
 SEC
-                  chmod 600 /etc/letsencrypt/cloudflare.ini
-                  
-                  # Jalankan Certbot DNS-01 challenge untuk domain staging dengan deploy-hook untuk auto-renewal
-                  certbot certonly --dns-cloudflare \
-                    --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
-                    -d "staging-mqtt.${var.domain_name}" \
-                    --email "admin@${var.domain_name}" \
-                    --agree-tos --no-eff-email \
-                    --non-interactive \
-                    --deploy-hook "/home/ec2-user/iot-bigdata-project/infra/scripts/deploy-mqtt-cert.sh staging-mqtt.${var.domain_name}"
-              fi
+    chmod 600 /etc/letsencrypt/cloudflare.ini
+    
+    # Jalankan Certbot DNS-01 challenge untuk domain staging dengan deploy-hook untuk auto-renewal
+    certbot certonly --dns-cloudflare \
+      --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
+      -d "staging-mqtt.${var.domain_name}" \
+      --email "admin@${var.domain_name}" \
+      --agree-tos --no-eff-email \
+      --non-interactive \
+      --deploy-hook "/home/ec2-user/iot-bigdata-project/infra/scripts/deploy-mqtt-cert.sh staging-mqtt.${var.domain_name}"
+fi
 
-              # 6. Install & Configure Cloudflare Tunnel (cloudflared)
-              curl -L --output cloudflared.rpm https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-x86_64.rpm
-              dnf localinstall -y cloudflared.rpm
-              rm -f cloudflared.rpm
+# 6. Install & Configure Cloudflare Tunnel (cloudflared)
+curl -L --output cloudflared.rpm https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-x86_64.rpm
+dnf localinstall -y cloudflared.rpm
+rm -f cloudflared.rpm
 
-              TUNNEL_TOKEN=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/CLOUDFLARE_TUNNEL_TOKEN" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text || echo "")
-              if [ ! -z "$TUNNEL_TOKEN" ] && [ "$TUNNEL_TOKEN" != "placeholder_do_not_delete" ]; then
-                  echo "-> Installing and starting cloudflared systemd service..."
-                  cloudflared service install "$TUNNEL_TOKEN"
-              fi
-              EOF
+TUNNEL_TOKEN=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/CLOUDFLARE_TUNNEL_TOKEN" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text || echo "")
+if [ ! -z "$TUNNEL_TOKEN" ] && [ "$TUNNEL_TOKEN" != "placeholder_do_not_delete" ]; then
+    echo "-> Installing and starting cloudflared systemd service..."
+    cloudflared service install "$TUNNEL_TOKEN"
+fi
+EOF
 
   root_block_device {
     volume_size           = var.ebs_volume_size
@@ -235,45 +235,45 @@ resource "aws_instance" "datalayer_primary" {
     aws_security_group.datalayer.id
   ]
 
-  user_data = <<-EOF
-              #!/bin/bash
-              # 1. Tunggu hingga RPM dan script tersedia di S3 (diunggah oleh local-bootstrap.sh)
-              until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/packages/ | grep -q '\.rpm'; do
-                  echo "Waiting for packages in S3..."
-                  sleep 10
-              done
+  user_data = <<EOF
+#!/bin/bash
+# 1. Tunggu hingga RPM dan script tersedia di S3 (diunggah oleh local-bootstrap.sh)
+until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/packages/ | grep -q '\.rpm'; do
+    echo "Waiting for packages in S3..."
+    sleep 10
+done
 
-              until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/scripts/ | grep -q 'provision-db'; do
-                  echo "Waiting for scripts in S3..."
-                  sleep 10
-              done
+until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/scripts/ | grep -q 'provision-db'; do
+    echo "Waiting for scripts in S3..."
+    sleep 10
+done
 
-              # 2. Buat folder download
-              mkdir -p /home/ec2-user/db-pkg
-              cd /home/ec2-user
+# 2. Buat folder download
+mkdir -p /home/ec2-user/db-pkg
+cd /home/ec2-user
 
-              # 3. Tarik RPM dan script dari S3
-              aws s3 cp s3://${var.project_name}-datalake-${var.environment}/packages/ /home/ec2-user/ --recursive --exclude "*" --include "*.rpm" --region ${var.aws_region}
-              aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/db-pkg/ --recursive --region ${var.aws_region}
+# 3. Tarik RPM dan script dari S3
+aws s3 cp s3://${var.project_name}-datalake-${var.environment}/packages/ /home/ec2-user/ --recursive --exclude "*" --include "*.rpm" --region ${var.aws_region}
+aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/db-pkg/ --recursive --region ${var.aws_region}
 
-              # 4. Ambil parameter DB dari file rahasia di S3
-              until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env; do
-                  echo "Waiting for DB secrets in S3..."
-                  sleep 10
-              done
-              aws s3 cp s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env /tmp/db-secrets.env
-              chmod 600 /tmp/db-secrets.env
-              source /tmp/db-secrets.env
-              rm -f /tmp/db-secrets.env
+# 4. Ambil parameter DB dari file rahasia di S3
+until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env; do
+    echo "Waiting for DB secrets in S3..."
+    sleep 10
+done
+aws s3 cp s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env /tmp/db-secrets.env
+chmod 600 /tmp/db-secrets.env
+source /tmp/db-secrets.env
+rm -f /tmp/db-secrets.env
 
-              REPLICA_IP="${cidrhost(var.private_subnet_cidr, 20)}"
+REPLICA_IP="${cidrhost(var.private_subnet_cidr, 20)}"
 
-              # 5. Jalankan provisioning primary
-              chmod +x /home/ec2-user/db-pkg/provision-db-primary.sh
-              cp /home/ec2-user/db-pkg/init.sql /tmp/init.sql || true
-              cd /home/ec2-user/db-pkg
-              ./provision-db-primary.sh "\$POSTGRES_DB" "\$POSTGRES_USER" "\$POSTGRES_PASSWORD" "\$REPLICA_IP"
-              EOF
+# 5. Jalankan provisioning primary
+chmod +x /home/ec2-user/db-pkg/provision-db-primary.sh
+cp /home/ec2-user/db-pkg/init.sql /tmp/init.sql || true
+cd /home/ec2-user/db-pkg
+./provision-db-primary.sh "\$POSTGRES_DB" "\$POSTGRES_USER" "\$POSTGRES_PASSWORD" "\$REPLICA_IP"
+EOF
 
   root_block_device {
     volume_size           = var.ebs_volume_size
@@ -300,50 +300,50 @@ resource "aws_instance" "datalayer_replica" {
     aws_security_group.datalayer.id
   ]
 
-  user_data = <<-EOF
-              #!/bin/bash
-              # 1. Tunggu hingga RPM dan script tersedia di S3
-              until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/packages/ | grep -q '\.rpm'; do
-                  echo "Waiting for packages in S3..."
-                  sleep 10
-              done
+  user_data = <<EOF
+#!/bin/bash
+# 1. Tunggu hingga RPM dan script tersedia di S3
+until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/packages/ | grep -q '\.rpm'; do
+    echo "Waiting for packages in S3..."
+    sleep 10
+done
 
-              until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/scripts/ | grep -q 'provision-db'; do
-                  echo "Waiting for scripts in S3..."
-                  sleep 10
-              done
+until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/scripts/ | grep -q 'provision-db'; do
+    echo "Waiting for scripts in S3..."
+    sleep 10
+done
 
-              # 2. Buat folder download
-              mkdir -p /home/ec2-user/db-pkg
-              cd /home/ec2-user
+# 2. Buat folder download
+mkdir -p /home/ec2-user/db-pkg
+cd /home/ec2-user
 
-              # 3. Tarik RPM dan script dari S3
-              aws s3 cp s3://${var.project_name}-datalake-${var.environment}/packages/ /home/ec2-user/ --recursive --exclude "*" --include "*.rpm" --region ${var.aws_region}
-              aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/db-pkg/ --recursive --region ${var.aws_region}
+# 3. Tarik RPM dan script dari S3
+aws s3 cp s3://${var.project_name}-datalake-${var.environment}/packages/ /home/ec2-user/ --recursive --exclude "*" --include "*.rpm" --region ${var.aws_region}
+aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/db-pkg/ --recursive --region ${var.aws_region}
 
-              # 4. Ambil parameter DB dari file rahasia di S3
-              until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env; do
-                  echo "Waiting for DB secrets in S3..."
-                  sleep 10
-              done
-              aws s3 cp s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env /tmp/db-secrets.env
-              chmod 600 /tmp/db-secrets.env
-              source /tmp/db-secrets.env
-              rm -f /tmp/db-secrets.env
+# 4. Ambil parameter DB dari file rahasia di S3
+until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env; do
+    echo "Waiting for DB secrets in S3..."
+    sleep 10
+done
+aws s3 cp s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env /tmp/db-secrets.env
+chmod 600 /tmp/db-secrets.env
+source /tmp/db-secrets.env
+rm -f /tmp/db-secrets.env
 
-              PRIMARY_IP="${cidrhost(var.private_subnet_cidr, 10)}"
+PRIMARY_IP="${cidrhost(var.private_subnet_cidr, 10)}"
 
-              # 5. Tunggu hingga primary DB port 5432 aktif sebelum running replica script
-              until timeout 3 bash -c "cat < /dev/null > /dev/tcp/\$PRIMARY_IP/5432" 2>/dev/null; do
-                  echo "Waiting for primary database at \$PRIMARY_IP..."
-                  sleep 5
-              done
+# 5. Tunggu hingga primary DB port 5432 aktif sebelum running replica script
+until timeout 3 bash -c "cat < /dev/null > /dev/tcp/\$PRIMARY_IP/5432" 2>/dev/null; do
+    echo "Waiting for primary database at \$PRIMARY_IP..."
+    sleep 5
+done
 
-              # 6. Jalankan provisioning replica
-              chmod +x /home/ec2-user/db-pkg/provision-db-replica.sh
-              cd /home/ec2-user/db-pkg
-              ./provision-db-replica.sh "\$PRIMARY_IP" "\$POSTGRES_PASSWORD"
-              EOF
+# 6. Jalankan provisioning replica
+chmod +x /home/ec2-user/db-pkg/provision-db-replica.sh
+cd /home/ec2-user/db-pkg
+./provision-db-replica.sh "\$PRIMARY_IP" "\$POSTGRES_PASSWORD"
+EOF
 
   root_block_device {
     volume_size           = var.ebs_volume_size
