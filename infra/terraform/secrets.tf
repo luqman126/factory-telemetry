@@ -157,6 +157,7 @@ resource "aws_ssm_parameter" "cloudflare_api_token" {
   type        = "SecureString"
   value       = "placeholder_do_not_delete"
   description = "Cloudflare API token for Certbot DNS challenge"
+  overwrite   = true
 
   lifecycle {
     ignore_changes = [value]
@@ -168,6 +169,7 @@ resource "aws_ssm_parameter" "tailscale_auth_key" {
   type        = "SecureString"
   value       = "placeholder_do_not_delete"
   description = "Tailscale auth key for VPN registration"
+  overwrite   = true
 
   lifecycle {
     ignore_changes = [value]
@@ -179,6 +181,7 @@ resource "aws_ssm_parameter" "cloudflare_tunnel_token" {
   type        = "SecureString"
   value       = "placeholder_do_not_delete"
   description = "Cloudflare Tunnel Token for Grafana remote access"
+  overwrite   = true
 
   lifecycle {
     ignore_changes = [value]
