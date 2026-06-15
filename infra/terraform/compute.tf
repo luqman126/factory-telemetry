@@ -130,7 +130,7 @@ resource "aws_instance" "applayer" {
 
               # 3. Install & configure Spark 3.5.8
               cd /opt
-              curl -SL https://archive.apache.org/dist/spark/spark-3.5.8/spark-3.5.8-bin-hadoop3.tgz -o spark-3.5.8-bin-hadoop3.tgz
+              curl -SL https://dlcdn.apache.org/spark/spark-3.5.8/spark-3.5.8-bin-hadoop3.tgz -o spark-3.5.8-bin-hadoop3.tgz
               tar -xzf spark-3.5.8-bin-hadoop3.tgz
               ln -sf /opt/spark-3.5.8-bin-hadoop3 /opt/spark
               rm -f spark-3.5.8-bin-hadoop3.tgz
