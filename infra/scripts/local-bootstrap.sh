@@ -24,20 +24,13 @@ if ! command -v terraform >/dev/null 2>&1; then
     exit 1
 fi
 
-# 2. Tarik IP Bastion Publik dinamis dari output Terraform
-echo "-> Menarik info Bastion IP dari Terraform state..."
-if [ ! -d "${TERRAFORM_DIR}/.terraform" ]; then
-    echo "WARNING: Folder .terraform tidak ditemukan. Harap pastikan terraform sudah di-init." >&2
-fi
+# 2. Setup Bastion IP (Gunakan IP Tailscale agar bisa SSH lewat VPN)
+echo "-> Menentukan IP Bastion..."
+DEFAULT_BASTION_IP="100.127.104.77"
+read -p "Masukkan IP Bastion Host [Default: ${DEFAULT_BASTION_IP}]: " BASTION_IP
+BASTION_IP="${BASTION_IP:-$DEFAULT_BASTION_IP}"
 
-BASTION_IP=$(terraform -chdir="${TERRAFORM_DIR}" output -raw applayer_public_ip 2>/dev/null || echo "")
-
-if [ -z "$BASTION_IP" ] || [ "$BASTION_IP" == "No outputs found" ]; then
-    echo "WARNING: IP Bastion tidak ditemukan dari Terraform output. Menggunakan input manual."
-    read -p "Masukkan IP Publik applayer-1 (Bastion Host): " BASTION_IP
-fi
-
-echo "Bastion IP: ${BASTION_IP}"
+echo "Bastion IP yang digunakan: ${BASTION_IP}"
 
 # 3. Minta input Kredensial & Secrets
 echo ""
