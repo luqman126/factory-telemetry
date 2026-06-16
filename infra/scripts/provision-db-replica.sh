@@ -34,6 +34,10 @@ else
     exit 1
 fi
 
+echo "=== [1.5/6] Symlinking pg_config for TimescaleDB RPM compatibility ==="
+mkdir -p /usr/pgsql-16/bin
+ln -sf /usr/bin/pg_config /usr/pgsql-16/bin/pg_config
+
 echo "=== [2/6] Installing TimescaleDB ==="
 if rpm -q timescaledb-2-postgresql-16 >/dev/null 2>&1; then
     echo "TimescaleDB is already installed."
