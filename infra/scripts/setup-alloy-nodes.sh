@@ -99,6 +99,9 @@ deploy_to_database_node() {
         --output "$rendered_config"
 
     echo "-> Deploying to ${role} (${ip})..."
+    # Pastikan file RPM/config lama milik root dihapus terlebih dahulu agar SCP tidak Permission Denied
+    ssh -o StrictHostKeyChecking=no "${SSH_KEY_ARGS[@]}" "ec2-user@${ip}" "sudo rm -f /home/ec2-user/$(basename "$ALLOY_RPM_PATH") /home/ec2-user/config.alloy" || true
+
     # Copy RPM and Config
     scp -o StrictHostKeyChecking=no "${SSH_KEY_ARGS[@]}" "$ALLOY_RPM_PATH" "ec2-user@${ip}:/home/ec2-user/"
     scp -o StrictHostKeyChecking=no "${SSH_KEY_ARGS[@]}" "$rendered_config" "ec2-user@${ip}:/home/ec2-user/config.alloy"
