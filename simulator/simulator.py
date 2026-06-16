@@ -148,11 +148,17 @@ def run(interval_sec: float = 2.0) -> None:
     Setiap `interval_sec` detik, publish satu payload per device.
     """
     global _tick
+    import ssl
 
     broker_host = os.getenv("MQTT_BROKER_HOST", "localhost")
     broker_port = int(os.getenv("MQTT_BROKER_PORT", 1883))
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+
+    # Enable TLS jika port adalah 8883
+    if broker_port == 8883:
+        logger.info("Mengaktifkan koneksi TLS/SSL untuk port 8883...")
+        client.tls_set_context(ssl.create_default_context())
 
     # Auth jika dikonfigurasi
     mqtt_user = os.getenv("MQTT_USER")

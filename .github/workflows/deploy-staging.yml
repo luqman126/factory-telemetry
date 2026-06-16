@@ -125,6 +125,8 @@ jobs:
                   chmod 666 mosquitto/passwd
                   chmod +x generate_mqtt_passwd.sh
                   ./generate_mqtt_passwd.sh "$MQTT_USER" "$MQTT_PASSWORD"
+                  ./generate_mqtt_passwd.sh "device_001" "$MQTT_PASSWORD"
+                  ./generate_mqtt_passwd.sh "device_002" "$MQTT_PASSWORD"
                 else
                   echo "WARNING: MQTT_USER or MQTT_PASSWORD not set in .env"
                 fi
