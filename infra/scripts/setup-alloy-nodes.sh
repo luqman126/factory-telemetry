@@ -100,14 +100,14 @@ deploy_to_database_node() {
 
     echo "-> Deploying to ${role} (${ip})..."
     # Pastikan file RPM/config lama milik root dihapus terlebih dahulu agar SCP tidak Permission Denied
-    ssh -o StrictHostKeyChecking=no "${SSH_KEY_ARGS[@]}" "ec2-user@${ip}" "sudo rm -f /home/ec2-user/$(basename "$ALLOY_RPM_PATH") /home/ec2-user/config.alloy" || true
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "${SSH_KEY_ARGS[@]}" "ec2-user@${ip}" "sudo rm -f /home/ec2-user/$(basename "$ALLOY_RPM_PATH") /home/ec2-user/config.alloy" || true
 
     # Copy RPM and Config
-    scp -o StrictHostKeyChecking=no "${SSH_KEY_ARGS[@]}" "$ALLOY_RPM_PATH" "ec2-user@${ip}:/home/ec2-user/"
-    scp -o StrictHostKeyChecking=no "${SSH_KEY_ARGS[@]}" "$rendered_config" "ec2-user@${ip}:/home/ec2-user/config.alloy"
+    scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "${SSH_KEY_ARGS[@]}" "$ALLOY_RPM_PATH" "ec2-user@${ip}:/home/ec2-user/"
+    scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "${SSH_KEY_ARGS[@]}" "$rendered_config" "ec2-user@${ip}:/home/ec2-user/config.alloy"
 
     # Install & restart service via SSH
-    ssh -o StrictHostKeyChecking=no "${SSH_KEY_ARGS[@]}" "ec2-user@${ip}" "
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "${SSH_KEY_ARGS[@]}" "ec2-user@${ip}" "
         sudo dnf localinstall -y /home/ec2-user/$(basename "$ALLOY_RPM_PATH")
         sudo cp /home/ec2-user/config.alloy /etc/alloy/config.alloy
         sudo systemctl enable --now alloy
