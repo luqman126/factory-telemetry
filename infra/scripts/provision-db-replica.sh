@@ -24,7 +24,15 @@ DB_PASSWORD="$2"
 
 echo "=== [1/6] Installing PostgreSQL 16 ==="
 rm -f /etc/yum.repos.d/timescaledb.repo
-dnf install -y postgresql16-server postgresql16-contrib postgresql16-server-devel
+if rpm -q postgresql16-server >/dev/null 2>&1; then
+    echo "PostgreSQL 16 is already installed."
+elif ls /home/ec2-user/postgresql16-*.rpm >/dev/null 2>&1; then
+    echo "Installing PostgreSQL 16 from local RPMs..."
+    dnf localinstall -y /home/ec2-user/postgresql16-*.rpm
+else
+    echo "ERROR: Local PostgreSQL 16 RPMs not found at /home/ec2-user/." >&2
+    exit 1
+fi
 
 echo "=== [2/6] Installing TimescaleDB ==="
 if rpm -q timescaledb-2-postgresql-16 >/dev/null 2>&1; then

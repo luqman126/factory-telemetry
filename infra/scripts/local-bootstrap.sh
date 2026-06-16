@@ -10,6 +10,9 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TERRAFORM_DIR="${PROJECT_DIR}/infra/terraform"
 ENV_FILE="${PROJECT_DIR}/infra/.env"
 
+# Disable AWS CLI v2 pager globally to prevent terminal blocking on long JSON outputs
+export AWS_PAGER=""
+
 if [ -f "$ENV_FILE" ]; then
     # Load variables jika file .env lokal ada
     set -a
@@ -137,15 +140,35 @@ echo "SSM Command sent dengan ID: $COMMAND_ID"
 echo "Menunggu command selesai..."
 aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$BASTION_INSTANCE_ID" --region "$AWS_REGION" || true
 
-# Ambil hasil output log
+# Ambil hasil output log secara bersih (raw text)
+STATUS=$(aws ssm get-command-invocation \
+  --command-id "$COMMAND_ID" \
+  --instance-id "$BASTION_INSTANCE_ID" \
+  --region "$AWS_REGION" \
+  --query "Status" \
+  --output text)
+
+echo "Status Eksekusi: $STATUS"
+
 echo ""
-echo "--- Status Eksekusi Bootstrap Bastion ---"
+echo "--- Log Output Bastion ---"
 aws ssm get-command-invocation \
   --command-id "$COMMAND_ID" \
   --instance-id "$BASTION_INSTANCE_ID" \
   --region "$AWS_REGION" \
-  --query "{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}" \
-  --output table
+  --query "StandardOutputContent" \
+  --output text
+
+if [ "$STATUS" != "Success" ]; then
+    echo ""
+    echo "--- Log Error Bastion ---"
+    aws ssm get-command-invocation \
+      --command-id "$COMMAND_ID" \
+      --instance-id "$BASTION_INSTANCE_ID" \
+      --region "$AWS_REGION" \
+      --query "StandardErrorContent" \
+      --output text
+fi
 
 echo ""
 echo "============================================================"

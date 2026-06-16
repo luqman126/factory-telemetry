@@ -59,7 +59,10 @@ mkdir -p "$DOWNLOAD_DIR"
 cd "$DOWNLOAD_DIR"
 rm -f *.rpm
 
-# 5. Download Packages (timescaledb-2-postgresql-16, timescaledb-2-loader-postgresql-16, timescaledb-tools, and alloy)
+# 5. Download Packages (PostgreSQL, TimescaleDB, and Grafana Alloy)
+echo "-> Downloading PostgreSQL 16 RPMs (x86_64) with dependencies..."
+sudo dnf download --arch=x86_64 --resolve postgresql16-server postgresql16-contrib postgresql16-server-devel postgresql16 postgresql16-libs -y
+
 echo "-> Downloading TimescaleDB RPMs (x86_64)..."
 sudo dnf download --arch=x86_64 timescaledb-2-postgresql-16 timescaledb-2-loader-postgresql-16 timescaledb-tools -y
 
