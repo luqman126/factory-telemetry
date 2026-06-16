@@ -328,7 +328,7 @@ chmod +x /home/ec2-user/db-pkg/provision-db-primary.sh
 cp /home/ec2-user/db-pkg/init.sql /tmp/init.sql || true
 # 6. Jalankan provisioning primary
 cd /home/ec2-user/db-pkg
-./provision-db-primary.sh "$$POSTGRES_DB" "$$POSTGRES_USER" "$$POSTGRES_PASSWORD" "$$REPLICA_IP"
+./provision-db-primary.sh "$POSTGRES_DB" "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$REPLICA_IP"
 
 # 7. Fix ownership of ec2-user directory
 chown -R ec2-user:ec2-user /home/ec2-user
@@ -393,15 +393,15 @@ rm -f /tmp/db-secrets.env
 PRIMARY_IP="${cidrhost(var.private_subnet_cidr, 10)}"
 
 # 5. Tunggu hingga primary DB port 5432 aktif sebelum running replica script
-until timeout 3 bash -c "cat < /dev/null > /dev/tcp/$$PRIMARY_IP/5432" 2>/dev/null; do
-    echo "Waiting for primary database at $$PRIMARY_IP..."
+until timeout 3 bash -c "cat < /dev/null > /dev/tcp/$PRIMARY_IP/5432" 2>/dev/null; do
+    echo "Waiting for primary database at $PRIMARY_IP..."
     sleep 5
 done
 
 # 6. Jalankan provisioning replica
 chmod +x /home/ec2-user/db-pkg/provision-db-replica.sh
 cd /home/ec2-user/db-pkg
-./provision-db-replica.sh "$$PRIMARY_IP" "$$POSTGRES_PASSWORD"
+./provision-db-replica.sh "$PRIMARY_IP" "$POSTGRES_PASSWORD"
 
 # 7. Fix ownership of ec2-user directory
 chown -R ec2-user:ec2-user /home/ec2-user

@@ -89,6 +89,20 @@ deploy_to_database_node() {
     local role="$1"
     local ip="$2"
     local rendered_config="${CONFIG_OUT_DIR}/config.alloy.${role}"
+ 
+    echo "-> Waiting for SSH to become available on ${role} (${ip})..."
+    for i in {1..30}; do
+        if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3 "${SSH_KEY_ARGS[@]}" "ec2-user@${ip}" "echo 'SSH is up'" &>/dev/null; then
+            echo "   SSH is online on ${ip}."
+            break
+        fi
+        echo "   SSH not ready yet on ${ip} (attempt $i/30), retrying in 10 seconds..."
+        sleep 10
+        if [ $i -eq 30 ]; then
+            echo "ERROR: SSH timeout on ${ip} after 5 minutes." >&2
+            exit 1
+        fi
+    done
 
     echo "-> Rendering configuration for ${role}..."
     python3 "$RENDER_SCRIPT" \
