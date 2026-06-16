@@ -61,15 +61,13 @@ rm -f *.rpm
 
 # 5. Download Packages (PostgreSQL, TimescaleDB, and Grafana Alloy)
 echo "-> Downloading PostgreSQL 16 RPMs (x86_64) with ALL dependencies..."
-mkdir -p /tmp/empty-db-root
-sudo dnf download --installroot=/tmp/empty-db-root --releasever=2023 --arch=x86_64 --resolve postgresql16-server postgresql16-contrib postgresql16-server-devel -y
-sudo rm -rf /tmp/empty-db-root
+sudo dnf download --resolve --alldeps --destdir="$DOWNLOAD_DIR" --arch=x86_64 postgresql16-server postgresql16-contrib postgresql16-server-devel -y
 
-echo "-> Downloading TimescaleDB RPMs (x86_64)..."
-sudo dnf download --arch=x86_64 timescaledb-2-postgresql-16 timescaledb-2-loader-postgresql-16 timescaledb-tools -y
+echo "-> Downloading TimescaleDB RPMs (x86_64) with ALL dependencies..."
+sudo dnf download --resolve --alldeps --destdir="$DOWNLOAD_DIR" --arch=x86_64 timescaledb-2-postgresql-16 timescaledb-2-loader-postgresql-16 timescaledb-tools -y
 
-echo "-> Downloading Grafana Alloy RPM (x86_64)..."
-sudo dnf download --arch=x86_64 alloy -y
+echo "-> Downloading Grafana Alloy RPM (x86_64) with ALL dependencies..."
+sudo dnf download --resolve --alldeps --destdir="$DOWNLOAD_DIR" --arch=x86_64 alloy -y
 
 # 6. Upload packages to S3 bucket
 echo "-> Syncing RPM packages to s3://${S3_BUCKET}/packages/ ..."
