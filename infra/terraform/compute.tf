@@ -326,8 +326,12 @@ REPLICA_IP="${cidrhost(var.private_subnet_cidr, 20)}"
 # 5. Jalankan provisioning primary
 chmod +x /home/ec2-user/db-pkg/provision-db-primary.sh
 cp /home/ec2-user/db-pkg/init.sql /tmp/init.sql || true
+# 6. Jalankan provisioning primary
 cd /home/ec2-user/db-pkg
 ./provision-db-primary.sh "\$POSTGRES_DB" "\$POSTGRES_USER" "\$POSTGRES_PASSWORD" "\$REPLICA_IP"
+
+# 7. Fix ownership of ec2-user directory
+chown -R ec2-user:ec2-user /home/ec2-user
 EOF
 
   root_block_device {
@@ -398,6 +402,9 @@ done
 chmod +x /home/ec2-user/db-pkg/provision-db-replica.sh
 cd /home/ec2-user/db-pkg
 ./provision-db-replica.sh "\$PRIMARY_IP" "\$POSTGRES_PASSWORD"
+
+# 7. Fix ownership of ec2-user directory
+chown -R ec2-user:ec2-user /home/ec2-user
 EOF
 
   root_block_device {
