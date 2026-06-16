@@ -35,41 +35,67 @@ if ! command -v terraform >/dev/null 2>&1; then
     exit 1
 fi
 
-# 2. Minta input Kredensial & Secrets
-echo ""
-echo "--- Pengisian Kredensial Pihak Ketiga ---"
-read -p "Masukkan Cloudflare API Token (izin Zone.DNS Edit): " CF_TOKEN
-read -p "Masukkan Tailscale Ephemeral/Reusable Auth Key (tskey-auth-...): " TS_KEY
-read -p "Masukkan Cloudflare Tunnel Token (untuk Grafana - opsional): " CF_TUNNEL_TOKEN
-
-if [ -z "$CF_TOKEN" ] || [ -z "$TS_KEY" ]; then
-    echo "ERROR: Cloudflare API Token dan Tailscale Auth Key tidak boleh kosong." >&2
-    exit 1
-fi
-
-# 3. Daftarkan Parameter Baru ke AWS SSM Parameter Store
+# 2. Minta input Kredensial & Secrets (Opsional jika sudah ada di SSM)
 AWS_REGION="ap-southeast-1"
 ENV="staging"
 PREFIX="/iot-bigdata/${ENV}"
 
+# Cek apakah parameter sudah ada di SSM Parameter Store
+CF_EXISTS=0
+TS_EXISTS=0
+CF_TUNNEL_EXISTS=0
+
+aws ssm get-parameter --name "${PREFIX}/CLOUDFLARE_API_TOKEN" --region "$AWS_REGION" &>/dev/null && CF_EXISTS=1 || true
+aws ssm get-parameter --name "${PREFIX}/TAILSCALE_AUTH_KEY" --region "$AWS_REGION" &>/dev/null && TS_EXISTS=1 || true
+aws ssm get-parameter --name "${PREFIX}/CLOUDFLARE_TUNNEL_TOKEN" --region "$AWS_REGION" &>/dev/null && CF_TUNNEL_EXISTS=1 || true
+
 echo ""
-echo "-> Mendaftarkan Cloudflare API Token ke AWS SSM..."
-aws ssm put-parameter \
-  --name "${PREFIX}/CLOUDFLARE_API_TOKEN" \
-  --value "$CF_TOKEN" \
-  --type "SecureString" \
-  --overwrite \
-  --region "$AWS_REGION"
+echo "--- Pengisian Kredensial Pihak Ketiga (Tekan Enter untuk skip jika sudah ada di SSM) ---"
 
-echo "-> Mendaftarkan Tailscale Auth Key ke AWS SSM..."
-aws ssm put-parameter \
-  --name "${PREFIX}/TAILSCALE_AUTH_KEY" \
-  --value "$TS_KEY" \
-  --type "SecureString" \
-  --overwrite \
-  --region "$AWS_REGION"
+prompt_cf="Masukkan Cloudflare API Token"
+[ $CF_EXISTS -eq 1 ] && prompt_cf="$prompt_cf [Sudah ada di SSM, Enter untuk skip]"
+read -p "$prompt_cf: " CF_TOKEN
 
-if [ ! -z "$CF_TUNNEL_TOKEN" ]; then
+prompt_ts="Masukkan Tailscale Auth Key (tskey-auth-...)"
+[ $TS_EXISTS -eq 1 ] && prompt_ts="$prompt_ts [Sudah ada di SSM, Enter untuk skip]"
+read -p "$prompt_ts: " TS_KEY
+
+prompt_tunnel="Masukkan Cloudflare Tunnel Token (opsional)"
+[ $CF_TUNNEL_EXISTS -eq 1 ] && prompt_tunnel="$prompt_tunnel [Sudah ada di SSM, Enter untuk skip]"
+read -p "$prompt_tunnel: " CF_TUNNEL_TOKEN
+
+# 3. Daftarkan Parameter Baru ke AWS SSM jika diisi
+if [ -n "$CF_TOKEN" ]; then
+    echo "-> Mendaftarkan Cloudflare API Token ke AWS SSM..."
+    aws ssm put-parameter \
+      --name "${PREFIX}/CLOUDFLARE_API_TOKEN" \
+      --value "$CF_TOKEN" \
+      --type "SecureString" \
+      --overwrite \
+      --region "$AWS_REGION"
+elif [ $CF_EXISTS -eq 0 ]; then
+    echo "ERROR: Cloudflare API Token tidak boleh kosong karena belum ada di SSM." >&2
+    exit 1
+else
+    echo "-> Menggunakan Cloudflare API Token yang sudah ada di SSM."
+fi
+
+if [ -n "$TS_KEY" ]; then
+    echo "-> Mendaftarkan Tailscale Auth Key ke AWS SSM..."
+    aws ssm put-parameter \
+      --name "${PREFIX}/TAILSCALE_AUTH_KEY" \
+      --value "$TS_KEY" \
+      --type "SecureString" \
+      --overwrite \
+      --region "$AWS_REGION"
+elif [ $TS_EXISTS -eq 0 ]; then
+    echo "ERROR: Tailscale Auth Key tidak boleh kosong karena belum ada di SSM." >&2
+    exit 1
+else
+    echo "-> Menggunakan Tailscale Auth Key yang sudah ada di SSM."
+fi
+
+if [ -n "$CF_TUNNEL_TOKEN" ]; then
     echo "-> Mendaftarkan Cloudflare Tunnel Token ke AWS SSM..."
     aws ssm put-parameter \
       --name "${PREFIX}/CLOUDFLARE_TUNNEL_TOKEN" \
@@ -89,9 +115,11 @@ if [ ! -z "$CF_TUNNEL_TOKEN" ]; then
         mkdir -p "$(dirname "$ENV_FILE")"
         echo "CLOUDFLARE_TUNNEL_TOKEN=\"${CF_TUNNEL_TOKEN}\"" > "$ENV_FILE"
     fi
+elif [ $CF_TUNNEL_EXISTS -eq 1 ]; then
+    echo "-> Menggunakan Cloudflare Tunnel Token yang sudah ada di SSM."
 fi
 
-echo "SUCCESS: Kredensial berhasil didaftarkan di SSM Parameter Store."
+echo "SUCCESS: Kredensial siap digunakan."
 
 # 4. Ambil output infrastruktur dari Terraform
 echo ""
