@@ -26,8 +26,8 @@ jobs:
           echo "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
-          # 2. Buat folder tujuan di server jika belum ada
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} "mkdir -p /home/ec2-user/iot-bigdata-project"
+          # 2. Buat folder tujuan di server jika belum ada & pastikan kepemilikan oleh ec2-user
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} "mkdir -p /home/ec2-user/iot-bigdata-project && sudo chown -R ec2-user:ec2-user /home/ec2-user/iot-bigdata-project"
 
           # 3. Kirim file menggunakan rsync (abaikan folder git & terraform)
           echo "-> Pushing code to staging server..."
