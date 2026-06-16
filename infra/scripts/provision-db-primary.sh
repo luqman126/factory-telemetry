@@ -116,7 +116,7 @@ CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};
 GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};
 GRANT pg_monitor TO ${DB_USER};
 CREATE USER replicator WITH REPLICATION PASSWORD '${DB_PASSWORD}';
-SELECT pg_create_physical_replication_slot('node3_replica_slot');
+SELECT pg_create_physical_replication_slot('replica_datalayer2_slot');
 EOF
 
 echo "=== [7/7] Initializing schema ==="

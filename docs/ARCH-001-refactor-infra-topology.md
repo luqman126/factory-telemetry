@@ -94,7 +94,7 @@ Semua service yang connect ke database menggunakan **satu file**: `infra/.env` d
 ### Requirements:
 
 - **Replication slot** wajib digunakan agar WAL tidak di-recycle sebelum replica consume.
-- Slot name convention: `node3_replica_slot`.
+- Slot name convention: `replica_datalayer2_slot`.
 - Monitor slot lag via `pg_stat_replication` dan `pg_replication_slots`.
 
 ### Key PostgreSQL settings (Primary):
@@ -109,7 +109,7 @@ max_replication_slots = 3
 
 ```
 primary_conninfo = 'host=<datalayer-1-ip> port=5432 user=replicator'
-primary_slot_name = 'node3_replica_slot'
+primary_slot_name = 'replica_datalayer2_slot'
 ```
 
 ---

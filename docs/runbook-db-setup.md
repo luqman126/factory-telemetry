@@ -29,9 +29,50 @@ iot-bigdata-datalayer-1 (DB Primary)  ───── streaming replication ─�
 
 ### Prerequisites
 
-- Amazon Linux 2023 (EC2 t3.small, di private subnet `10.0.2.0/24`)
-- Security Group: inbound TCP 5432 dari `applayer-sg` dan `10.0.2.0/24`, inbound TCP 22 dari `applayer-sg`
+- Amazon Linux 2023 (EC2 t3.small, di private subnet `10.0.2.0/24` for prod, `10.1.2.0/24` for staging)
+- Security Group: inbound TCP 5432 dari `applayer-sg` dan private subnet database, inbound TCP 22 dari `applayer-sg`
 - Akses SSH via applayer-1 (Bastion Host)
+
+### 0. Automated Provisioning (Preferred & Staging Standard)
+
+Untuk Staging Environment dan rebuild infrastruktur otomatis (Tier 3), proses instalasi dan konfigurasi database berjalan 100% otomatis menggunakan skrip yang disinkronisasi melalui S3 (karena database node berada di private subnet tanpa akses internet):
+
+1. **Sinkronisasi Package & Script dari Bastion (`applayer-1`)**:
+   Jalankan skrip [sync-packages-to-s3.sh](file:///home/cheshire/iot-bigdata-project/infra/scripts/sync-packages-to-s3.sh) di Bastion Host:
+   ```bash
+   cd ~/iot-bigdata-project
+   chmod +x infra/scripts/sync-packages-to-s3.sh
+   ./infra/scripts/sync-packages-to-s3.sh
+   ```
+   Skrip ini secara otomatis:
+   - Menambahkan repositori TimescaleDB dan Grafana di Bastion.
+   - Mengunduh PostgreSQL 16, TimescaleDB, dan Grafana Alloy RPM beserta seluruh dependensinya (`--resolve --alldeps`) langsung ke local directory.
+   - Mengunggah seluruh RPM ke `s3://<bucket-name>/packages/`.
+   - Mengunggah file provisioning scripts (`infra/scripts/*`) dan skema database (`db/init.sql`) ke `s3://<bucket-name>/scripts/`.
+   - Mengambil kredensial database dari SSM Parameter Store dan mengunggahnya sebagai file env terenkripsi sementara di `s3://<bucket-name>/secrets/db-secrets.env`.
+
+2. **Bootstrapping Otomatis via Terraform `user_data`**:
+   Saat Terraform mem-provision instance `datalayer-1` dan `datalayer-2`, skrip `user_data` akan:
+   - Melakukan polling menunggu RPM, skrip, dan rahasia tersedia di S3.
+   - Mengunduh seluruh berkas tersebut secara lokal ke instance DB.
+   - Membaca kredensial dari `db-secrets.env`.
+   - Menjalankan skrip [provision-db-primary.sh](file:///home/cheshire/iot-bigdata-project/infra/scripts/provision-db-primary.sh) (pada `datalayer-1`) atau [provision-db-replica.sh](file:///home/cheshire/iot-bigdata-project/infra/scripts/provision-db-replica.sh) (pada `datalayer-2`) secara lokal dan offline.
+
+3. **Cara Menjalankan Script Secara Manual (Jika Diperlukan)**:
+   Jika ingin melakukan provisioning ulang tanpa meluncurkan ulang VM:
+   ```bash
+   # Di datalayer-1 (Primary)
+   sudo ./provision-db-primary.sh <db_name> <db_user> <db_password> <replica_ip>
+
+   # Di datalayer-2 (Replica)
+   sudo ./provision-db-replica.sh <primary_ip> <db_password>
+   ```
+
+---
+
+### Manual Setup Step-by-Step (For Reference & Debugging)
+
+Langkah-langkah di bawah ini merupakan proses manual yang dijalankan secara manual oleh operator untuk pemahaman mendalam:
 
 ### 1. Install PostgreSQL 16
 
@@ -502,7 +543,7 @@ sudo systemctl stop postgresql
 sudo rm -rf /var/lib/pgsql/data
 sudo PGPASSWORD='<password>' pg_basebackup \
     -h <primary_ip> -U replicator -D /var/lib/pgsql/data \
-    -Fp -Xs -P -R -S node3_replica_slot
+    -Fp -Xs -P -R -S replica_datalayer2_slot
 sudo chown -R postgres:postgres /var/lib/pgsql/data
 sudo chmod 700 /var/lib/pgsql/data
 sudo systemctl start postgresql

@@ -20,7 +20,7 @@ Sebelum mulai failover, pastikan:
   ```bash
   sudo -u postgres psql -c "SELECT slot_name, active FROM pg_replication_slots;"
   ```
-  Expected: `node3_replica_slot | t` (legacy name — akan diganti saat rebuild).
+  Expected: `replica_datalayer2_slot | t`.
 
 - [ ] Read replica datasource working (Grafana UI test connection ke `TimescaleDB-Replica` returns OK).
 
@@ -48,14 +48,14 @@ ssh ec2-user@10.0.2.20   # datalayer-2
 
 ### Naming Convention untuk Replication Slot
 
-Naming lama (`node3_replica_slot`) ambigu — referensi ke "Node 3" dari arsitektur lama. Saat rebuild slot baru di runbook ini, pakai pattern lebih jelas:
+Untuk menghindari ambiguitas, penamaan slot replikasi disesuaikan dengan peran aktif node yang menjadi replica:
 
 | Pattern | Lokasi | Konsumer |
 |---------|--------|----------|
-| `replica_datalayer1_slot` | Di primary saat datalayer-1 jadi replica | datalayer-1 |
-| `replica_datalayer2_slot` | Di primary saat datalayer-2 jadi replica | datalayer-2 |
+| `replica_datalayer1_slot` | Di primary (`datalayer-2`) saat `datalayer-1` menjadi replica | datalayer-1 |
+| `replica_datalayer2_slot` | Di primary (`datalayer-1`) saat `datalayer-2` menjadi replica | datalayer-2 |
 
-Setelah Phase 5/6 selesai, slot legacy `node3_replica_slot` akan terhapus secara natural (data directory di-wipe saat rebuild).
+Penamaan legacy `node3_replica_slot` sudah sepenuhnya dihapus dari sistem otomasi provisioning kita dan digantikan langsung oleh `replica_datalayer2_slot` pada inisialisasi awal.
 
 ---
 
@@ -244,7 +244,7 @@ sudo -u postgres psql -c "SELECT pg_reload_conf();"
 # Stop PostgreSQL kalau masih jalan
 sudo systemctl stop postgresql
 
-# Hapus data directory lama (termasuk slot legacy node3_replica_slot)
+# Hapus data directory lama (untuk replikasi segar)
 sudo rm -rf /var/lib/pgsql/data
 
 # Base backup dari primary baru (datalayer-2)

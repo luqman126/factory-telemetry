@@ -68,7 +68,7 @@ for i in {1..30}; do
         -U replicator \
         -D "$PGDATA" \
         -Fp -Xs -P -R \
-        -S node3_replica_slot; then
+        -S replica_datalayer2_slot; then
         echo "Base backup completed successfully!"
         break
     else
@@ -86,7 +86,7 @@ cat >> "$PGDATA/postgresql.conf" <<EOF
 
 # --- Replica settings ---
 hot_standby = on
-primary_slot_name = 'node3_replica_slot'
+primary_slot_name = 'replica_datalayer2_slot'
 EOF
 
 echo "=== [6/6] Starting PostgreSQL (replica mode) ==="

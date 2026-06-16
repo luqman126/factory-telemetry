@@ -395,27 +395,37 @@ This phase had the **most failures** — 7 distinct issues.
 | 23 | Spark | `JAVA_HOME is not set` in systemd | Systemd strips env vars | Dynamic detection in pipeline script | ✅ |
 | 24 | Spark | Java 21 not installed | Not in Terraform bootstrap | Added to `compute.tf` user_data | ✅ |
 | 25 | Monitoring | Alloy pg_up = 0 (Ident Auth Failed) | Default pg_hba.conf uses `ident` for localhost | Changed defaults to `scram-sha-256` in `provision-db-primary.sh` | ✅ |
+| 26 | Database | SSM Private Subnet Connection Timeout | Private DB subnet cannot access SSM API | Bastion fetches credentials from SSM and uploads to S3; DB nodes pull offline via VPC S3 Endpoint | ✅ |
+| 27 | Database | DNF Download Trap & 403 Forbidden | `dnf download --installroot` lacks AL2023 authentication metadata/plugins, returning 403 | Replaced `--installroot` with native `dnf download --resolve --alldeps --destdir=...` on host | ✅ |
+| 28 | Database | TimescaleDB pg_config path mismatch | RHEL9 RPM post-install expects `/usr/pgsql-16/bin/pg_config` | Added symlink `/usr/pgsql-16/bin/pg_config -> /usr/bin/pg_config` before localinstall | ✅ |
+| 29 | Terraform | Variables literally escaped (`\$`) in heredoc | Backslash escapes (`\$`) written literally, causing bash variable expansion to fail | Removed backslash/double-dollar escapes from Terraform heredoc for variables without curly braces | ✅ |
+| 30 | Monitoring | Alloy setup fails on booting instances | setup-alloy-nodes.sh runs before DB instances are listening on SSH | Added SSH polling wait-and-retry loop in setup-alloy-nodes.sh | ✅ |
+| 31 | Simulator | Local simulator TLS handshake failure | Port 8883 is TLS-only but simulator didn't configure SSL | Import `ssl` and call `client.tls_set_context(ssl.create_default_context())` if port is 8883 | ✅ |
+| 32 | Docker | Mosquitto authentication failed for device | `mosquitto/passwd` only registered `kagebyo` | Updated deploy pipeline to generate credentials for `device_001` and `device_002` | ✅ |
+| 33 | CI/CD | CI/CD pipeline triggered on docs/IaC changes | Unnecessary pipeline run history | Added `paths-ignore` to `deploy-staging.yml` and supported `[skip ci]` commit messages | ✅ |
 
-**Score**: 23/25 fully automated (✅), 2/25 still require manual intervention (⚠️).
+**Score**: 31/33 fully automated (✅), 2/33 still require manual intervention (⚠️).
 
 ---
 
 ## 11. Remaining Manual Steps
 
-| Category | Manual Step | Frequency | Effort |
-|----------|------------|-----------|--------|
-| **Secrets** | Write `infra/.env` with DB passwords, API tokens, host IPs | Per environment | Low |
-| **DNS** | Create Cloudflare DNS records for staging subdomains | One-time | Low |
-| **Cloudflare Tunnel** | Install `cloudflared`, authenticate, create tunnel | One-time | Medium |
-| **SSL Certificates** | Run Certbot for initial MQTT TLS certificate | One-time | Medium |
-| **TimescaleDB RPMs** | Download on bastion, scp to private subnet, localinstall | Per rebuild | High |
-| **Alloy RPMs** | Same bastion-download pattern for Grafana Alloy | Per rebuild | Medium |
-| **Mosquitto Password** | Run `generate_mqtt_passwd.sh` with credentials | Per rebuild | Low |
-| **PostgreSQL Grants** | `GRANT pg_monitor TO <user>` on each DB node | Per rebuild | Low |
-| **Alloy Config** | Customize `config.alloy` per node (instance name, Prometheus URL, postgres DSN) | Per node | Medium |
-| **Spark Binaries** | Download and extract Spark 3.5.8 to `/opt/spark` | Per rebuild | Medium |
-| **PySpark TMPDIR** | Set `TMPDIR` before pip install on constrained instances | Per rebuild | Low |
-| **Python 3.12** | Install on fresh instances before venv creation | Per rebuild | Low |
+Setelah implementasi otomatisasi Tier 3 selesai, hampir seluruh langkah manual telah diotomatisasi secara penuh. Hanya langkah persiapan awal satu-kali (one-time setup) untuk infrastruktur cloud baru yang tersisa:
+
+| Category | Manual Step | Frequency | Effort | Status |
+|----------|------------|-----------|--------|--------|
+| **DNS** | Create Cloudflare DNS records for staging subdomains | One-time | Low | ⚠️ Manual |
+| **Cloudflare Tunnel** | Install `cloudflared`, authenticate, create tunnel | One-time | Medium | ⚠️ Manual |
+| **SSL Certificates** | Run Certbot for initial MQTT TLS certificate | One-time | Medium | ⚠️ Manual |
+| **Secrets** | Write secrets to AWS SSM Parameter Store | One-time | Low | ✅ Automated |
+| **TimescaleDB RPMs** | Download and cache all RPM dependencies | Per rebuild | High | ✅ Automated |
+| **Alloy RPMs** | Deploy Grafana Alloy monitoring package | Per rebuild | Medium | ✅ Automated |
+| **Mosquitto Password** | Generate passwd file with device credentials | Per rebuild | Low | ✅ Automated |
+| **PostgreSQL Grants** | Grant `pg_monitor` privileges to user | Per rebuild | Low | ✅ Automated |
+| **Alloy Config** | Customize `config.alloy` per server node | Per node | Medium | ✅ Automated |
+| **Spark Binaries** | Download and extract Spark 3.5.8 | Per rebuild | Medium | ✅ Automated |
+| **PySpark TMPDIR** | Configure pip TMPDIR on constrained RAM VM | Per rebuild | Low | ✅ Automated |
+| **Python 3.12** | Install Python version for virtualenvs | Per rebuild | Low | ✅ Automated |
 
 ---
 
@@ -507,22 +517,43 @@ During database provisioning on `datalayer-1` and `datalayer-2`, several network
 * **Issue**: Creating the `timescaledb.repo` on the bastion using heredocs inside a `sudo sh -c` wrapper can inadvertently expand `$basearch` to an empty string, breaking the DNF download URL.
 * **Resolution**: Use `sudo tee` with a quoted heredoc `<<'EOF'` to write the repository file exactly as is, preventing local shell expansion of `$basearch`.
 
-### C. Harmless RPM `%post` Scriptlet Warnings
-* **Issue**: During `dnf localinstall` on `datalayer-1`, the following warning occurs:
+### C. TimescaleDB pg_config Mismatch (AL2023)
+* **Issue**: During `dnf localinstall` of TimescaleDB loader RPM, the following warning occurs:
   ```text
   Using pg_config located at /usr/pgsql-16/bin/pg_config to finish installation...
   ERROR: Could not find pg_config, expected it at /usr/pgsql-16/bin/pg_config. Please fix and try again.
   warning: %post(timescaledb-2-postgresql-16-...) scriptlet failed, exit status 1
   ```
-* **Explanation**: The TimescaleDB RPM (built for RHEL/PGDG) expects `pg_config` at `/usr/pgsql-16/bin/pg_config`. However, Amazon Linux 2023's native PostgreSQL package places `pg_config` at `/usr/bin/pg_config`. 
-* **Impact**: **Harmless**. The RPM successfully extracts the binary `.so` and extension files. The script manually fixes the paths in Step 3/7 (symlinking extensions to standard AL2023 paths) and updates `postgresql.conf` in Step 4/7, making this warning completely safe to ignore.
+  This happens because the RHEL9-compiled TimescaleDB RPM expects `pg_config` at `/usr/pgsql-16/bin/pg_config`, but Amazon Linux 2023 installs it natively at `/usr/bin/pg_config`. If it fails, the PostgreSQL service will fail to load the extension library and crash during startup.
+* **Resolution**: Create the directories and a symlink pointing to the real `pg_config` before installing the RPMs:
+  ```bash
+  mkdir -p /usr/pgsql-16/bin
+  ln -sf /usr/bin/pg_config /usr/pgsql-16/bin/pg_config
+  ```
+
+### D. DNF Download Trap and installroot 403 Forbidden
+* **Issue**: `dnf download --resolve` only downloads dependencies that are not currently installed on the host. When trying to resolve this using `--installroot=/tmp/empty-root`, DNF returns a `403 Forbidden` error because the empty directory lacks the system GPG keys, variables, and AWS S3 repository authorization metadata/plugins.
+* **Resolution**: Replaced `--installroot` with native `dnf download --resolve --alldeps --destdir=...` on the host. The `--alldeps` flag forces DNF to download all recursive dependencies even if they are already installed, while running natively on the host avoids the 403 error by using the system's authenticated repository configurations.
+
+### E. Terraform Heredoc Shell Variable Escaping
+* **Issue**: In `compute.tf`, shell variables in `user_data` heredocs were escaped using backslashes (e.g., `\$POSTGRES_USER` or `\$REPLICA_IP`). Because Terraform heredoc does not process `\$` as an escape, it wrote the backslashes literally to the script. Bash then treated them as literal strings (e.g., `"$REPLICA_IP"`), which resulted in invalid lines in `pg_hba.conf` like `host replication replicator $REPLICA_IP/32 scram-sha-256`, causing PostgreSQL to crash.
+* **Resolution**: Removed the backslash escaping (`\$` and `$$`) entirely from the Terraform heredocs for variables without curly braces. Terraform writes these clean single-dollar variables literally to the script, which bash evaluates correctly at runtime.
+
+### F. Mosquitto TLS & Client Port Authentication Mismatches
+* **Issue**: The local simulator failed to connect or publish to `staging-mqtt.chescloud.my.id:8883` because port 8883 is configured for TLS, but the simulator did not configure SSL/TLS. External clients must connect via TLS on port 8883, and only `kagebyo` was registered in the password file, blocking `device_001` connections.
+* **Resolution**: Updated `simulator.py` to call `client.tls_set_context(ssl.create_default_context())` when port is 8883. Also modified the post-deployment script to generate Mosquitto passwords for `device_001` and `device_002` automatically.
+
+### G. CI/CD Pipeline Noise from Documentation and Infrastructure-Only Commits
+* **Issue**: Every time a document (e.g., markdown file in `docs/`) or Terraform configuration was pushed to the `staging` branch, the GitHub Actions deploy pipeline was triggered. This resulted in an unnecessarily cluttered workflow history and triggered SSH/rsync runs on the staging server for changes that had no impact on the running application code.
+* **Resolution**: 
+  1. Configured `paths-ignore` in [.github/workflows/deploy-staging.yml](file:///home/cheshire/iot-bigdata-project/.github/workflows/deploy-staging.yml) to automatically ignore pushes that only contain documentation (`docs/**`, `*.md`, `README.md`) or Terraform configs (`infra/terraform/**`).
+  2. Documented the standard GitHub tag mechanism: developers can append `[skip ci]` or `[ci skip]` anywhere in their commit messages to bypass GitHub Actions manually (e.g., `git commit -m "docs: improve setup runbooks [skip ci]"`).
 
 ---
 
-
 ## Conclusion
 
-Building the staging environment revealed **24 distinct failures** across 8 phases. Of these, **14 have been fully automated** in the codebase, and **10 remain as manual steps**.
+Building and automating the staging environment revealed **33 distinct failures** across 8 phases. Of these, **31 have been fully automated** in the codebase (94%), and only **2 remain as manual steps** (initial one-time Certbot generation and TimescaleDB RPM cache bootstrapping).
 
 The key lesson: **production environments accumulate implicit knowledge** — manual installations, one-time configurations, and undocumented tweaks that aren't captured in code. Replicating an environment exposes every single one of these gaps.
 

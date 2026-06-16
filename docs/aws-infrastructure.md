@@ -18,6 +18,9 @@
 
 ## Network
 
+> [!NOTE]
+> Konfigurasi di bawah ini menjelaskan VPC **Production** (`10.0.0.0/16`). Untuk **Staging**, skema yang digunakan adalah `10.1.0.0/16` (Public Subnet: `10.1.1.0/24`, Private Subnet: `10.1.2.0/24`). Seluruh skrip otomatisasi mendukung kedua skema tersebut secara dinamis.
+
 ### VPC
 
 | Atribut | Value |
