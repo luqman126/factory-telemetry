@@ -106,11 +106,19 @@ resource "aws_iam_role_policy" "least_privilege" {
 # ---- 2. EC2 Instance: Applayer-1 (Bastion + Apps) ----
 # Ditempatkan di Public Subnet agar bisa diakses oleh client / IoT Device
 resource "aws_instance" "applayer" {
-  ami                  = var.ami_id
-  instance_type        = var.applayer_instance_type
-  subnet_id            = aws_subnet.public.id
-  key_name             = var.key_pair_name
-  iam_instance_profile = aws_iam_instance_profile.applayer.name
+  ami                         = var.ami_id
+  instance_type               = var.applayer_instance_type
+  subnet_id                   = aws_subnet.public.id
+  key_name                    = var.key_pair_name
+  iam_instance_profile        = aws_iam_instance_profile.applayer.name
+  user_data_replace_on_change = true
+
+  depends_on = [
+    aws_iam_role_policy.least_privilege,
+    aws_ssm_parameter.cloudflare_api_token,
+    aws_ssm_parameter.tailscale_auth_key,
+    aws_ssm_parameter.cloudflare_tunnel_token
+  ]
 
   vpc_security_group_ids = [
     aws_security_group.applayer.id
@@ -119,11 +127,49 @@ resource "aws_instance" "applayer" {
   # Bootstrapping (Otomatisasi instalasi software saat pertama kali server menyala)
   user_data = <<EOF
 #!/bin/bash
+set -uo pipefail
+exec > >(tee -a /var/log/iot-user-data.log | logger -t iot-user-data -s 2>/dev/console) 2>&1
+
+log() {
+    echo "[$(date -Is)] $*" >&2
+}
+
+get_ssm_param() {
+    aws ssm get-parameter \
+      --name "$1" \
+      --with-decryption \
+      --region ${var.aws_region} \
+      --query "Parameter.Value" \
+      --output text 2>/dev/null || true
+}
+
+wait_ssm_param() {
+    name="$1"
+    label="$2"
+    attempts=30
+    delay=10
+
+    for attempt in $(seq 1 "$attempts"); do
+        value="$(get_ssm_param "$name")"
+        if [ -n "$value" ] && [ "$value" != "placeholder_do_not_delete" ] && [ "$value" != "None" ]; then
+            printf '%s' "$value"
+            return 0
+        fi
+        log "Waiting for $label in SSM ($attempt/$attempts)..."
+        sleep "$delay"
+    done
+
+    log "WARN: $label is missing or still placeholder after $((attempts * delay)) seconds."
+    return 1
+}
+
 # 1. Update system & install package dasar
+log "Installing base packages..."
 dnf update -y
-dnf install -y git python3 python3-pip python3.12 java-21-amazon-corretto-devel
+dnf install -y awscli git python3 python3-pip python3.12 java-21-amazon-corretto-devel
 
 # 2. Install & jalankan Docker + Docker Compose v2 (Standar AL2023)
+log "Installing Docker..."
 dnf install -y docker
 systemctl enable --now docker
 usermod -aG docker ec2-user
@@ -134,12 +180,14 @@ curl -SL https://github.com/docker/compose/releases/download/v2.26.1/docker-comp
 chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
 # 2.5 Tarik provisioning scripts dari S3 agar folder scripts lokal di Bastion langsung terisi lengkap
+log "Downloading provisioning scripts from S3..."
 mkdir -p /home/ec2-user/iot-bigdata-project/infra/scripts
 aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/iot-bigdata-project/infra/scripts/ --recursive --region ${var.aws_region}
 chmod +x /home/ec2-user/iot-bigdata-project/infra/scripts/*.sh
 chown -R ec2-user:ec2-user /home/ec2-user/iot-bigdata-project
 
 # 3. Install & configure Spark 3.5.8
+log "Installing Spark..."
 cd /opt
 curl -SL https://dlcdn.apache.org/spark/spark-3.5.8/spark-3.5.8-bin-hadoop3.tgz -o spark-3.5.8-bin-hadoop3.tgz
 tar -xzf spark-3.5.8-bin-hadoop3.tgz
@@ -151,26 +199,29 @@ echo 'export SPARK_HOME=/opt/spark' > /etc/profile.d/spark.sh
 echo 'export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin' >> /etc/profile.d/spark.sh
 
 # 4. Install & Configure Tailscale
+log "Installing Tailscale..."
 curl -fsSL https://tailscale.com/install.sh | sh
 systemctl enable --now tailscaled
 
 # Ambil Tailscale key dari SSM dan login secara otomatis
-TS_KEY=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/TAILSCALE_AUTH_KEY" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text || echo "")
-if [ ! -z "$TS_KEY" ] && [ "$TS_KEY" != "placeholder_do_not_delete" ]; then
-    echo "-> Registering Tailscale with Auth Key..."
+TS_KEY="$(wait_ssm_param "/${var.project_name}/${var.environment}/TAILSCALE_AUTH_KEY" "Tailscale auth key")"
+if [ -n "$TS_KEY" ]; then
+    log "Registering Tailscale with auth key..."
     tailscale up --authkey="$TS_KEY" --accept-routes --accept-dns=true
+    tailscale status || true
 fi
 
 # 5. Install Certbot & Cloudflare DNS Plugin untuk SSL (AL2023 pip method)
+log "Installing Certbot..."
 python3 -m venv /opt/certbot
 /opt/certbot/bin/pip install --upgrade pip
 /opt/certbot/bin/pip install certbot certbot-dns-cloudflare
 ln -sf /opt/certbot/bin/certbot /usr/bin/certbot
 
 # Ambil Cloudflare Token dari SSM dan terbitkan sertifikat SSL
-CF_TOKEN=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/CLOUDFLARE_API_TOKEN" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text || echo "")
-if [ ! -z "$CF_TOKEN" ] && [ "$CF_TOKEN" != "placeholder_do_not_delete" ]; then
-    echo "-> Requesting Let's Encrypt SSL Cert via Certbot..."
+CF_TOKEN="$(wait_ssm_param "/${var.project_name}/${var.environment}/CLOUDFLARE_API_TOKEN" "Cloudflare API token")"
+if [ -n "$CF_TOKEN" ]; then
+    log "Requesting Let's Encrypt SSL cert via Certbot..."
     mkdir -p /etc/letsencrypt
     cat <<SEC > /etc/letsencrypt/cloudflare.ini
 dns_cloudflare_api_token = $CF_TOKEN
@@ -192,11 +243,15 @@ curl -L --output cloudflared.rpm https://github.com/cloudflare/cloudflared/relea
 dnf localinstall -y cloudflared.rpm
 rm -f cloudflared.rpm
 
-TUNNEL_TOKEN=$(aws ssm get-parameter --name "/${var.project_name}/${var.environment}/CLOUDFLARE_TUNNEL_TOKEN" --with-decryption --region ${var.aws_region} --query "Parameter.Value" --output text || echo "")
-if [ ! -z "$TUNNEL_TOKEN" ] && [ "$TUNNEL_TOKEN" != "placeholder_do_not_delete" ]; then
-    echo "-> Installing and starting cloudflared systemd service..."
+TUNNEL_TOKEN="$(wait_ssm_param "/${var.project_name}/${var.environment}/CLOUDFLARE_TUNNEL_TOKEN" "Cloudflare tunnel token")"
+if [ -n "$TUNNEL_TOKEN" ]; then
+    log "Installing and starting cloudflared systemd service..."
     cloudflared service install "$TUNNEL_TOKEN"
+    systemctl enable --now cloudflared
+    systemctl status cloudflared --no-pager || true
 fi
+
+log "Applayer bootstrap finished."
 EOF
 
   root_block_device {
