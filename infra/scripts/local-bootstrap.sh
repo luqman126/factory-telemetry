@@ -32,50 +32,7 @@ if ! command -v terraform >/dev/null 2>&1; then
     exit 1
 fi
 
-# 1.5 Cek ssh-agent (Wajib untuk Agent Forwarding)
-if ! ssh-add -l >/dev/null 2>&1; then
-    echo "WARNING: ssh-agent belum aktif atau belum mendeteksi adanya SSH key."
-    echo "Script membutuhkan SSH Agent Forwarding (-A) agar Bastion bisa mengakses node privat."
-    echo "Silakan jalankan perintah ini terlebih dahulu jika koneksi gagal:"
-    echo "  eval \$(ssh-agent) && ssh-add ~/.ssh/iot-bigdata-key.pem"
-    echo ""
-    read -p "Apakah Anda ingin tetap mencoba melanjutkan? (y/n) [y]: " CONTINUE_SSH
-    CONTINUE_SSH="${CONTINUE_SSH:-y}"
-    if [ "$CONTINUE_SSH" != "y" ]; then
-        exit 1
-    fi
-fi
-
-# 2. Setup Bastion IP (Gunakan IP Tailscale agar bisa SSH lewat VPN)
-echo "-> Menentukan IP Bastion..."
-# Gunakan BASTION_TAILSCALE_IP dari .env jika ada
-if [ ! -z "${BASTION_TAILSCALE_IP:-}" ]; then
-    read -p "Masukkan IP Bastion Host [Default: ${BASTION_TAILSCALE_IP}]: " INPUT_IP
-    BASTION_IP="${INPUT_IP:-$BASTION_TAILSCALE_IP}"
-else
-    # Jika tidak ada di .env lokal, minta input manual
-    read -p "Masukkan IP Bastion Host (IP Tailscale Anda): " BASTION_IP
-    if [ -z "$BASTION_IP" ]; then
-        echo "ERROR: IP Bastion wajib diisi." >&2
-        exit 1
-    fi
-fi
-
-echo "Bastion IP yang digunakan: ${BASTION_IP}"
-
-# Simpan Bastion IP ke .env (ditolak dari Git/gitignore) agar awet dan ISO 27001 compliant
-if [ -f "$ENV_FILE" ]; then
-    if ! grep -q "^BASTION_TAILSCALE_IP=" "$ENV_FILE"; then
-        echo "BASTION_TAILSCALE_IP=\"${BASTION_IP}\"" >> "$ENV_FILE"
-    else
-        sed -i "s/^BASTION_TAILSCALE_IP=.*/BASTION_TAILSCALE_IP=\"${BASTION_IP}\"/g" "$ENV_FILE"
-    fi
-else
-    mkdir -p "$(dirname "$ENV_FILE")"
-    echo "BASTION_TAILSCALE_IP=\"${BASTION_IP}\"" > "$ENV_FILE"
-fi
-
-# 3. Minta input Kredensial & Secrets
+# 2. Minta input Kredensial & Secrets
 echo ""
 echo "--- Pengisian Kredensial Pihak Ketiga ---"
 read -p "Masukkan Cloudflare API Token (izin Zone.DNS Edit): " CF_TOKEN
@@ -87,7 +44,7 @@ if [ -z "$CF_TOKEN" ] || [ -z "$TS_KEY" ]; then
     exit 1
 fi
 
-# 4. Daftarkan Parameter Baru ke AWS SSM Parameter Store
+# 3. Daftarkan Parameter Baru ke AWS SSM Parameter Store
 AWS_REGION="ap-southeast-1"
 ENV="staging"
 PREFIX="/iot-bigdata/${ENV}"
@@ -133,26 +90,64 @@ fi
 
 echo "SUCCESS: Kredensial berhasil didaftarkan di SSM Parameter Store."
 
-# 5. Salin script dan database schema dari local ke bastion via SCP
+# 4. Ambil output infrastruktur dari Terraform
 echo ""
-echo "-> Menyalin script dan file skema database ke Bastion..."
-ssh -o StrictHostKeyChecking=no ec2-user@${BASTION_IP} "mkdir -p /home/ec2-user/iot-bigdata-project/infra/scripts /home/ec2-user/iot-bigdata-project/db"
-scp -o StrictHostKeyChecking=no -r "${PROJECT_DIR}/infra/scripts/"* ec2-user@${BASTION_IP}:/home/ec2-user/iot-bigdata-project/infra/scripts/
-scp -o StrictHostKeyChecking=no "${PROJECT_DIR}/db/init.sql" ec2-user@${BASTION_IP}:/home/ec2-user/iot-bigdata-project/db/init.sql
+echo "-> Membaca output Terraform..."
+if [ ! -f "${TERRAFORM_DIR}/terraform.tfstate" ]; then
+    echo "WARNING: terraform.tfstate tidak ditemukan. Pastikan Anda sudah menjalankan terraform apply." >&2
+    exit 1
+fi
 
-# 6. Jalankan Sinkronisasi RPM, script, dan init.sql ke S3 di Bastion secara remote
+S3_BUCKET=$(terraform -chdir="${TERRAFORM_DIR}" output -raw s3_bucket)
+BASTION_INSTANCE_ID=$(terraform -chdir="${TERRAFORM_DIR}" output -raw applayer_instance_id)
+
+if [ -z "$S3_BUCKET" ] || [ -z "$BASTION_INSTANCE_ID" ] || [ "$S3_BUCKET" = "No outputs found" ]; then
+    echo "ERROR: Gagal membaca output dari Terraform. Pastikan resources sudah di-apply." >&2
+    exit 1
+fi
+
+echo "S3 Bucket: ${S3_BUCKET}"
+echo "Bastion Instance ID: ${BASTION_INSTANCE_ID}"
+
+# 5. Salin script dan database schema dari local langsung ke S3
 echo ""
-echo "-> Memicu sinkronisasi paket RPM, script, dan init.sql ke S3 Bucket di Bastion..."
-# Gunakan SSH Agent forwarding agar bastion bisa scp/ssh jika dibutuhkan
-ssh -o StrictHostKeyChecking=no -A ec2-user@${BASTION_IP} "
-  chmod +x /home/ec2-user/iot-bigdata-project/infra/scripts/sync-packages-to-s3.sh
-  /home/ec2-user/iot-bigdata-project/infra/scripts/sync-packages-to-s3.sh
-"
+echo "-> Menyalin script dan file skema database ke S3..."
+aws s3 cp "${PROJECT_DIR}/infra/scripts/" "s3://${S3_BUCKET}/scripts/" --recursive --region "$AWS_REGION"
+aws s3 cp "${PROJECT_DIR}/db/init.sql" "s3://${S3_BUCKET}/scripts/init.sql" --region "$AWS_REGION"
+
+# 6. Jalankan Sinkronisasi RPM, script, dan init.sql di Bastion secara remote via AWS SSM Run Command
+echo ""
+echo "-> Memicu sinkronisasi paket RPM dan secrets di Bastion via AWS SSM..."
+COMMAND_ID=$(aws ssm send-command \
+  --instance-ids "$BASTION_INSTANCE_ID" \
+  --document-name "AWS-RunShellScript" \
+  --parameters "{\"commands\":[
+    \"mkdir -p /home/ec2-user/iot-bigdata-project/infra/scripts /home/ec2-user/iot-bigdata-project/db\",
+    \"aws s3 cp s3://${S3_BUCKET}/scripts/ /home/ec2-user/iot-bigdata-project/infra/scripts/ --recursive --region ${AWS_REGION}\",
+    \"aws s3 cp s3://${S3_BUCKET}/scripts/init.sql /home/ec2-user/iot-bigdata-project/db/init.sql --region ${AWS_REGION}\",
+    \"chmod +x /home/ec2-user/iot-bigdata-project/infra/scripts/*.sh\",
+    \"chown -R ec2-user:ec2-user /home/ec2-user/iot-bigdata-project\",
+    \"sudo -i -u ec2-user /home/ec2-user/iot-bigdata-project/infra/scripts/sync-packages-to-s3.sh\"
+  ]}" \
+  --region "$AWS_REGION" \
+  --query "Command.CommandId" \
+  --output text)
+
+echo "SSM Command sent dengan ID: $COMMAND_ID"
+echo "Menunggu command selesai..."
+aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$BASTION_INSTANCE_ID" --region "$AWS_REGION" || true
+
+# Ambil hasil output log
+echo ""
+echo "--- Status Eksekusi Bootstrap Bastion ---"
+aws ssm get-command-invocation \
+  --command-id "$COMMAND_ID" \
+  --instance-id "$BASTION_INSTANCE_ID" \
+  --region "$AWS_REGION" \
+  --query "{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}" \
+  --output table
 
 echo ""
 echo "============================================================"
-echo "    Setup Awal Selesai! Anda siap melakukan rebuild.        "
-echo "    Langkah berikutnya:                                     "
-echo "      1. terraform destroy                                  "
-echo "      2. terraform apply                                    "
+echo "    Setup Awal Selesai! Seluruh environment telah pulih.    "
 echo "============================================================"

@@ -33,6 +33,11 @@ output "applayer_private_ip" {
   value       = aws_instance.applayer.private_ip
 }
 
+output "applayer_instance_id" {
+  description = "Instance ID dari applayer"
+  value       = aws_instance.applayer.id
+}
+
 output "datalayer_1_private_ip" {
   description = "Private IP dari datalayer-1 (DB Primary)"
   value       = aws_instance.datalayer_primary.private_ip
