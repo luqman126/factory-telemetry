@@ -32,7 +32,8 @@ FLUSH_INTERVAL = 5.0  # detik
 _buffer: list = []
 _buffer_lock = threading.Lock()
 _flush_timer: threading.Timer | None = None
-
+_actuator_states = {}
+_actuator_lock = threading.Lock()
 
 def _flush_buffer() -> None:
     """Flush buffer ke DB. Dipanggil dari timer atau saat buffer penuh."""
@@ -96,6 +97,64 @@ def on_message(client, userdata, msg):
         payload = SensorPayload(**raw)
         data = payload.model_dump()
         data["time"] = payload.time.isoformat()
+
+        # ============================================================
+        # Real-time Closed-loop Control Loop
+        # ============================================================
+        device_id = payload.device_id
+        location = payload.location
+        temp = payload.temperature
+        voc = payload.voc_level
+        flux = payload.flux_ppm
+
+        # Check existing fan state fot his device
+        with _actuator_lock:
+            if device_id not in _actuator_states:
+                _actuator_states[device_id] = {"fan": "OFF"}
+            current_fan = _actuator_states[device_id]["fan"]
+        trigger_fan_on = False
+        trigger_fan_off = False
+        reason = ""
+
+        # Logic for turning the Fan ON (overheat or gas leak)
+        if temp is not None and temp > 35.0 and current_fan == "OFF":
+            trigger_fan_on = True
+            reason = f"Temperature exceeded threshold: {temp}°C"
+        elif voc is not None and voc in ("HAZARDOUS", "UNHEALTHY") and current_fan == "OFF":
+            trigger_fan_on = True
+            reason = f"VOC Level is unsafe: {voc} ({flux} ppm)"
+
+        # Logic for turning the Fan OFF (cooldown safety release)
+        # Turn OFF only when BOTH temperature and flux are in safe zones
+        elif current_fan == "ON":
+            temp_safe = (temp is None or temp < 30.0)
+            flux_safe = (flux is None or flux < 30.0)
+            if temp_safe and flux_safe:
+                trigger_fan_off = True
+                reason = f"All metrics returned to safe range."
+        
+        # Dispatch command publishes
+        if trigger_fan_on:
+            with _actuator_lock:
+                _actuator_states[device_id]["fan"] = "ON"
+            
+            topic = f"iot/commands/{device_id}/{location}"
+            cmd = {"actuator": "fan", "status" : "ON"}
+            message  = json.dumps(cmd)
+
+            client.publish(topic, message, qos=1)
+            logger.warning(f"[CONTROL] Emergency on {device_id} ({location}): {reason}. Triggering Fan ON.")
+
+        elif trigger_fan_off:
+            with _actuator_lock:
+                _actuator_states[device_id]["fan"] = "OFF"
+
+            topic = f"iot/commands/{device_id}/{location}"
+            cmd = {"actuator": "fan", "status": "OFF"}
+            message = json.dumps(cmd)
+
+            client.publish(topic, message, qos=1)
+            logger.info(f"[CONTROL] safe condition restored on {device_id} ({location}). Turning Fan OFF.")
 
         batch = None
         with _buffer_lock:
