@@ -32,8 +32,6 @@ FLUSH_INTERVAL = 5.0  # detik
 _buffer: list = []
 _buffer_lock = threading.Lock()
 _flush_timer: threading.Timer | None = None
-_actuator_states = {}
-_actuator_lock = threading.Lock()
 
 def _flush_buffer() -> None:
     """Flush buffer ke DB. Dipanggil dari timer atau saat buffer penuh."""
@@ -82,9 +80,12 @@ def on_connect(client, userdata, flags, reason_code, properties):
     if reason_code == 0:
         logger.info("MQTT terhubung ke broker")
         client.subscribe(MQTT_TOPIC)
-        logger.info(f"Subscribe ke topic: {MQTT_TOPIC}")
+        logger.info(f"Sent subscription request for {MQTT_TOPIC}")
     else:
         logger.error(f"Gagal connect ke broker, reason code: {reason_code}")
+
+def on_subscribe(client, userdata, mid, reason_code_list, properties):
+    logger.info(f"MQTT subscription acknowledged: mid={mid}, reason_codes={reason_code_list}")
 
 
 def on_message(client, userdata, msg):
@@ -107,11 +108,9 @@ def on_message(client, userdata, msg):
         voc = payload.voc_level
         flux = payload.flux_ppm
 
-        # Check existing fan state fot his device
-        with _actuator_lock:
-            if device_id not in _actuator_states:
-                _actuator_states[device_id] = {"fan": "OFF"}
-            current_fan = _actuator_states[device_id]["fan"]
+        # Check existing fan state for this device
+        current_fan = payload.fan_status or "OFF" # Read directly from reported state
+
         trigger_fan_on = False
         trigger_fan_off = False
         reason = ""
@@ -134,10 +133,7 @@ def on_message(client, userdata, msg):
                 reason = f"All metrics returned to safe range."
         
         # Dispatch command publishes
-        if trigger_fan_on:
-            with _actuator_lock:
-                _actuator_states[device_id]["fan"] = "ON"
-            
+        if trigger_fan_on:        
             topic = f"iot/commands/{device_id}/{location}"
             cmd = {"actuator": "fan", "status" : "ON"}
             message  = json.dumps(cmd)
@@ -146,9 +142,6 @@ def on_message(client, userdata, msg):
             logger.warning(f"[CONTROL] Emergency on {device_id} ({location}): {reason}. Triggering Fan ON.")
 
         elif trigger_fan_off:
-            with _actuator_lock:
-                _actuator_states[device_id]["fan"] = "OFF"
-
             topic = f"iot/commands/{device_id}/{location}"
             cmd = {"actuator": "fan", "status": "OFF"}
             message = json.dumps(cmd)
@@ -190,6 +183,7 @@ def start_mqtt_consumer() -> mqtt.Client:
     """
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect
+    client.on_subscribe = on_subscribe
     client.on_message = on_message
     client.on_disconnect = on_disconnect
 
