@@ -112,8 +112,11 @@ def update_device_sensors(device: dict):
 
     dev_state["state_ticks"] += 1
 
-    # 1. Base day/night oscillation (12.5 minute cycle for visibility on charts)
-    time_osc = 2.0 * math.sin(time.time() / 120.0)
+    # Calculate S-curve acceleration factor based on ticks (thermal inertia)
+    acceleration = math.tanh(dev_state["state_ticks"] / 5.0)
+
+    # 1. Base day/night oscillation (62.8 minutes cycle for visibility on charts)
+    time_osc = 2.0 * math.sin(time.time() / 600.0)
 
     if dev_state["state"] == "NORMAL":
         # Fluctuates naturally around baseline + oscillation
@@ -128,8 +131,11 @@ def update_device_sensors(device: dict):
             dev_state["vibration_rms"] = 0.02 + abs(random.gauss(0, 0.01))
 
     elif dev_state["state"] == "HEATING":
-        # Gradual heat up (overheating event)
-        dev_state["temperature"] += random.uniform(0.7, 1.2)
+        # Logarithmic heating curve smoothed by the acceleration factor
+        temp_diff = 70.0 - dev_state["temperature"]
+        dev_state["temperature"] += temp_diff * 0.08 * acceleration + random.gauss(0, 0.05)
+
+        # Humidity falls as heat rises
         dev_state["humidity"] = max(15.0, dev_state["humidity"] - random.uniform(0.2, 0.5))
 
         # Hard safety ceiling
@@ -158,8 +164,11 @@ def update_device_sensors(device: dict):
             dev_state["state"] = "NORMAL"
             dev_state["state_ticks"] = 0
         else:
-            # Active cooling
-            dev_state["temperature"] -= random.uniform(0.9, 1.5)
+            # Active cooling 
+            # Cool toward ac active target below the baseline to represent active cooling
+            cooling_target = base["temperature"] - 5
+            temp_diff = dev_state["temperature"] - cooling_target
+            dev_state["temperature"] -= temp_diff * 0.12 * acceleration + random.gauss(0, 0.05)
             dev_state["humidity"] = min(base["humidity"], dev_state["humidity"] + random.uniform(0.4, 0.8))
 
             if "mq135" in device["sensors"]:
@@ -198,6 +207,7 @@ def build_payload(device: dict) -> dict:
         "location":     device["location"],
         "temperature":  dev_state["temperature"],
         "humidity":     dev_state["humidity"],
+        "fan_status":   dev_state["fan_status"], # <--- REPORT THE STATE!
         "accel_x":      dev_state["accel_x"] if "mpu6050" in device["sensors"] else None,
         "accel_y":      dev_state["accel_y"] if "mpu6050" in device["sensors"] else None,
         "accel_z":      dev_state["accel_z"] if "mpu6050" in device["sensors"] else None,
@@ -213,19 +223,24 @@ def on_connect(client, userdata, flags, reason_code, properties):
         logger.info("[MQTT] Connected to broker successfully.")
         # Subscribe to command topics for all devices and locations
         client.subscribe("iot/commands/+/+")
-        logger.info("[MQTT] Subscribed to topic iot/commands/+/+")
+        logger.info("[MQTT] Sent subscription request for iot/commands/+/+")
     else:
         logger.error(f"[MQTT] Connection failed, reason code: {reason_code}")
+
+def on_subscribe(client, userdata, mid, reason_code_list, properties):
+    logger.info(f"[MQTT] Subscription acknowledged by broker. mid={mid}, reason_codes={reason_code_list}")
 
 def on_message(client, userdata, msg):
     """
     Handles incoming actuator commands from the cloud.
     Topic format: iot/commands/{device_id}/{location}
-    Payload format: {"actuator": "fan", "status": ON | "OFF"}
+    Payload format: {"actuator": "fan", "status": "ON" | "OFF"}
     """
     try:
+        logger.info(f"[MQTT DEBUG] Received message on topic {msg.topic}: {msg.payload.decode('utf-8')}")
         parts = msg.topic.split('/')
         if len(parts) < 4:
+            logger.warning(f"[MQTT DEBUG] Topic has less than 4 parts: {msg.topic}")
             return
         
         device_id = parts[2]
@@ -301,6 +316,11 @@ def run(devices_list, interval_sec: float = 2.0) -> None:
     broker_port = int(os.getenv("MQTT_BROKER_PORT", 1883))
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+
+    # Assign callbacks
+    client.on_connect = on_connect
+    client.on_message = on_message
+    client.on_subscribe = on_subscribe
 
     # Enable TLS if port is 8883
     if broker_port == 8883:
