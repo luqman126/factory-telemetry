@@ -166,8 +166,12 @@ def update_device_sensors(device: dict):
         else:
             # Active cooling 
             # Cool toward ac active target below the baseline to represent active cooling
+<<<<<<< HEAD
             cooling_target = base["temperature"] - 5
             temp_diff = dev_state["temperature"] - cooling_target
+=======
+            temp_diff = dev_state["temperature"] - base["temperature"] - 4
+>>>>>>> bc35f1d889ca88d8b938010da9209e4692f4f7bb
             dev_state["temperature"] -= temp_diff * 0.12 * acceleration + random.gauss(0, 0.05)
             dev_state["humidity"] = min(base["humidity"], dev_state["humidity"] + random.uniform(0.4, 0.8))
 
