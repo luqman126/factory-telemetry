@@ -19,8 +19,13 @@ load_dotenv()
 # ============================================================
 # Logging
 # ============================================================
+
+# Load logging level dynamically from environment variable (defaults to INFO)
+log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
+log_level = getattr(logging, log_level_str, logging.INFO)
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 logger = logging.getLogger(__name__)

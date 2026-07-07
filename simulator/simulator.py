@@ -24,8 +24,13 @@ from dotenv import load_dotenv
 _ENV_PATH = Path(__file__).parents[1] / "infra" / ".env"
 load_dotenv(dotenv_path=_ENV_PATH)
 
+# Load logging level dynamically from environment variable (defaults to INFO)
+log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
+log_level = getattr(logging, log_level_str, logging.INFO)
+
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
 logger = logging.getLogger(__name__)
@@ -237,10 +242,10 @@ def on_message(client, userdata, msg):
     Payload format: {"actuator": "fan", "status": "ON" | "OFF"}
     """
     try:
-        logger.info(f"[MQTT DEBUG] Received message on topic {msg.topic}: {msg.payload.decode('utf-8')}")
+        logger.debug(f"[MQTT DEBUG] Received message on topic {msg.topic}: {msg.payload.decode('utf-8')}")
         parts = msg.topic.split('/')
         if len(parts) < 4:
-            logger.warning(f"[MQTT DEBUG] Topic has less than 4 parts: {msg.topic}")
+            logger.debug(f"[MQTT DEBUG] Topic has less than 4 parts: {msg.topic}")
             return
         
         device_id = parts[2]
@@ -263,7 +268,7 @@ def on_message(client, userdata, msg):
                     dev_state["state"] = "NORMAL"
                     dev_state["state_ticks"] = 0
         else:
-            logger.warning(f"[ACTUATOR] Command received for unknown device: {device_id}")
+            logger.debug(f"[ACTUATOR] Command received for unknown device: {device_id}")
     except Exception as e:
         logger.error(f"[ACTUATOR] Error parsing command payload: {e}")
             
@@ -291,6 +296,7 @@ def start_input_thread():
                             logger.warning(f"[SIMULATOR] Manual trigger: Forcing {dev_id} to OVERHEAT!")
                             states[dev_id]["state"] = "HEATING"
                             states[dev_id]["state_ticks"] = 0
+                            states[dev_id]["fan_status"] = "OFF" # Make sure the fan status is OFF while the device state is HEATING.
                         else:
                             print(f"Unknown device: {dev_id}")
             except (KeyboardInterrupt, EOFError):
