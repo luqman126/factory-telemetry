@@ -8,7 +8,13 @@
 # ============================================================
 set -euo pipefail
 
-PROJECT_DIR="/home/ec2-user/iot-bigdata-project"
+ENV="${1:-staging}"
+PROJECT_NAME="${2:-iot-bigdata}"
+
+PREFIX="/${PROJECT_NAME}/${ENV}"
+FULL_PROJECT_NAME="${PROJECT_NAME}-project"
+
+PROJECT_DIR="/home/ec2-user/${FULL_PROJECT_NAME}"
 ENV_PATH="${PROJECT_DIR}/infra/.env"
 
 # 1. Fetch S3 bucket name
@@ -16,7 +22,7 @@ if [ -f "$ENV_PATH" ]; then
     S3_BUCKET=$(grep -E "^S3_BUCKET=" "$ENV_PATH" | cut -d= -f2 | tr -d '"'\')
 else
     echo "WARNING: Env file not found at ${ENV_PATH}. Falling back to SSM..."
-    S3_BUCKET=$(aws ssm get-parameter --name "/iot-bigdata/staging/S3_BUCKET" --region ap-southeast-1 --query "Parameter.Value" --output text)
+    S3_BUCKET=$(aws ssm get-parameter --name "${PREFIX}/S3_BUCKET" --region ap-southeast-1 --query "Parameter.Value" --output text)
 fi
 
 echo "Target S3 Bucket: ${S3_BUCKET}"
@@ -73,16 +79,11 @@ sudo dnf download --resolve --alldeps --destdir="$DOWNLOAD_DIR" --arch=x86_64 al
 echo "-> Syncing RPM packages to s3://${S3_BUCKET}/packages/ ..."
 aws s3 cp "$DOWNLOAD_DIR/" "s3://${S3_BUCKET}/packages/" --recursive --exclude "*" --include "*.rpm"
 
-# 7. Upload provisioning scripts and schema to S3 bucket
-echo "-> Syncing provisioning scripts and init.sql to s3://${S3_BUCKET}/scripts/ ..."
-aws s3 cp "${PROJECT_DIR}/infra/scripts/" "s3://${S3_BUCKET}/scripts/" --recursive
-aws s3 cp "${PROJECT_DIR}/db/init.sql" "s3://${S3_BUCKET}/scripts/init.sql"
-
-# 8. Fetch database secrets from SSM and upload to S3 for private database nodes
+# 7. Fetch database secrets from SSM and upload to S3 for private database nodes
 echo "-> Fetching DB credentials from SSM for private nodes..."
-DB_NAME=$(aws ssm get-parameter --name "/iot-bigdata/staging/POSTGRES_DB" --region ap-southeast-1 --query "Parameter.Value" --output text || echo "")
-DB_USER=$(aws ssm get-parameter --name "/iot-bigdata/staging/POSTGRES_USER" --region ap-southeast-1 --query "Parameter.Value" --output text || echo "")
-DB_PASSWORD=$(aws ssm get-parameter --name "/iot-bigdata/staging/POSTGRES_PASSWORD" --with-decryption --region ap-southeast-1 --query "Parameter.Value" --output text || echo "")
+DB_NAME=$(aws ssm get-parameter --name "${PREFIX}/POSTGRES_DB" --region ap-southeast-1 --query "Parameter.Value" --output text || echo "")
+DB_USER=$(aws ssm get-parameter --name "${PREFIX}/POSTGRES_USER" --region ap-southeast-1 --query "Parameter.Value" --output text || echo "")
+DB_PASSWORD=$(aws ssm get-parameter --name "${PREFIX}/POSTGRES_PASSWORD" --with-decryption --region ap-southeast-1 --query "Parameter.Value" --output text || echo "")
 
 if [ ! -z "$DB_PASSWORD" ]; then
     echo "-> Creating temporary db-secrets.env file..."

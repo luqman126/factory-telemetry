@@ -162,3 +162,29 @@ variable "telegram_chat_id_server" {
   default     = ""
 }
 
+# ---- Dynamic Provisioning Credentials ---- 
+variable "cloudflare_api_token" {
+  description = "Cloudflare API Token for Let's Encrypt Certbot DNS challenge"
+  type        = string
+  sensitive   = true
+}
+
+variable "tailscale_auth_key" {
+  description = "Tailscale Auth Key for automated VPN node registraion"
+  type        = string
+  sensitive   = true
+}
+
+variable "cloudflare_tunnel_token" {
+  description = "Cloudflare Tunnel Token for remote secure access to Grafana (Optional)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+# ---- Dynamic logging system ---- 
+variable "log_level" {
+  description = "Logging level configuration (DEBUG / INFO / WARNING / ERROR)"
+  type        = string
+  default     = "INFO"
+}

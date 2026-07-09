@@ -6,6 +6,11 @@
 # ============================================================
 set -euo pipefail
 
+POST_APPLY=0
+if [ "${1:-}" = "--post-apply" ]; then
+    POST_APPLY=1
+fi
+
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TERRAFORM_DIR="${PROJECT_DIR}/infra/terraform"
 ENV_FILE="${PROJECT_DIR}/infra/.env"
@@ -35,106 +40,110 @@ if ! command -v terraform >/dev/null 2>&1; then
     exit 1
 fi
 
-# 2. Minta input Kredensial & Secrets (Opsional jika sudah ada di SSM)
-AWS_REGION="ap-southeast-1"
-ENV="staging"
-PREFIX="/iot-bigdata/${ENV}"
+if [ "${POST_APPLY}" -eq 0 ]; then
 
-# Cek apakah parameter sudah ada di SSM Parameter Store
-CF_EXISTS=0
-TS_EXISTS=0
-CF_TUNNEL_EXISTS=0
+    # 2. Minta input Kredensial & Secrets (Opsional jika sudah ada di SSM)
+    AWS_REGION="${AWS_REGION:-ap-southeast-1}"
+    PREFIX="/${PROJECT_NAME:-iot-bigdata}/${ENV:-staging}"
 
-aws ssm get-parameter --name "${PREFIX}/CLOUDFLARE_API_TOKEN" --region "$AWS_REGION" &>/dev/null && CF_EXISTS=1 || true
-aws ssm get-parameter --name "${PREFIX}/TAILSCALE_AUTH_KEY" --region "$AWS_REGION" &>/dev/null && TS_EXISTS=1 || true
-aws ssm get-parameter --name "${PREFIX}/CLOUDFLARE_TUNNEL_TOKEN" --region "$AWS_REGION" &>/dev/null && CF_TUNNEL_EXISTS=1 || true
+    # Cek apakah parameter sudah ada di SSM Parameter Store
+    CF_EXISTS=0
+    TS_EXISTS=0
+    CF_TUNNEL_EXISTS=0
 
-echo ""
-echo "--- Pengisian Kredensial Pihak Ketiga (Tekan Enter untuk skip jika sudah ada di SSM) ---"
+    aws ssm get-parameter --name "${PREFIX}/CLOUDFLARE_API_TOKEN" --region "$AWS_REGION" &>/dev/null && CF_EXISTS=1 || true
+    aws ssm get-parameter --name "${PREFIX}/TAILSCALE_AUTH_KEY" --region "$AWS_REGION" &>/dev/null && TS_EXISTS=1 || true
+    aws ssm get-parameter --name "${PREFIX}/CLOUDFLARE_TUNNEL_TOKEN" --region "$AWS_REGION" &>/dev/null && CF_TUNNEL_EXISTS=1 || true
 
-prompt_cf="Masukkan Cloudflare API Token"
-[ $CF_EXISTS -eq 1 ] && prompt_cf="$prompt_cf [Sudah ada di SSM, Enter untuk skip]"
-read -p "$prompt_cf: " CF_TOKEN
+    echo ""
+    echo "--- Pengisian Kredensial Pihak Ketiga (Tekan Enter untuk skip jika sudah ada di SSM) ---"
 
-prompt_ts="Masukkan Tailscale Auth Key (tskey-auth-...)"
-[ $TS_EXISTS -eq 1 ] && prompt_ts="$prompt_ts [Sudah ada di SSM, Enter untuk skip]"
-read -p "$prompt_ts: " TS_KEY
+    prompt_cf="Masukkan Cloudflare API Token"
+    [ $CF_EXISTS -eq 1 ] && prompt_cf="$prompt_cf [Sudah ada di SSM, Enter untuk skip]"
+    read -p "$prompt_cf: " CF_TOKEN
 
-prompt_tunnel="Masukkan Cloudflare Tunnel Token (opsional)"
-[ $CF_TUNNEL_EXISTS -eq 1 ] && prompt_tunnel="$prompt_tunnel [Sudah ada di SSM, Enter untuk skip]"
-read -p "$prompt_tunnel: " CF_TUNNEL_TOKEN
+    prompt_ts="Masukkan Tailscale Auth Key (tskey-auth-...)"
+    [ $TS_EXISTS -eq 1 ] && prompt_ts="$prompt_ts [Sudah ada di SSM, Enter untuk skip]"
+    read -p "$prompt_ts: " TS_KEY
 
-# 3. Daftarkan Parameter Baru ke AWS SSM jika diisi
-if [ -n "$CF_TOKEN" ]; then
-    echo "-> Mendaftarkan Cloudflare API Token ke AWS SSM..."
-    aws ssm put-parameter \
-      --name "${PREFIX}/CLOUDFLARE_API_TOKEN" \
-      --value "$CF_TOKEN" \
-      --type "SecureString" \
-      --overwrite \
-      --region "$AWS_REGION"
-elif [ $CF_EXISTS -eq 0 ]; then
-    echo "ERROR: Cloudflare API Token tidak boleh kosong karena belum ada di SSM." >&2
-    exit 1
-else
-    echo "-> Menggunakan Cloudflare API Token yang sudah ada di SSM."
-fi
+    prompt_tunnel="Masukkan Cloudflare Tunnel Token (opsional)"
+    [ $CF_TUNNEL_EXISTS -eq 1 ] && prompt_tunnel="$prompt_tunnel [Sudah ada di SSM, Enter untuk skip]"
+    read -p "$prompt_tunnel: " CF_TUNNEL_TOKEN
 
-if [ -n "$TS_KEY" ]; then
-    echo "-> Mendaftarkan Tailscale Auth Key ke AWS SSM..."
-    aws ssm put-parameter \
-      --name "${PREFIX}/TAILSCALE_AUTH_KEY" \
-      --value "$TS_KEY" \
-      --type "SecureString" \
-      --overwrite \
-      --region "$AWS_REGION"
-elif [ $TS_EXISTS -eq 0 ]; then
-    echo "ERROR: Tailscale Auth Key tidak boleh kosong karena belum ada di SSM." >&2
-    exit 1
-else
-    echo "-> Menggunakan Tailscale Auth Key yang sudah ada di SSM."
-fi
-
-if [ -n "$CF_TUNNEL_TOKEN" ]; then
-    echo "-> Mendaftarkan Cloudflare Tunnel Token ke AWS SSM..."
-    aws ssm put-parameter \
-      --name "${PREFIX}/CLOUDFLARE_TUNNEL_TOKEN" \
-      --value "$CF_TUNNEL_TOKEN" \
-      --type "SecureString" \
-      --overwrite \
-      --region "$AWS_REGION"
-
-    # Simpan Cloudflare Tunnel Token ke .env lokal
-    if [ -f "$ENV_FILE" ]; then
-        if ! grep -q "^CLOUDFLARE_TUNNEL_TOKEN=" "$ENV_FILE"; then
-            echo "CLOUDFLARE_TUNNEL_TOKEN=\"${CF_TUNNEL_TOKEN}\"" >> "$ENV_FILE"
-        else
-            sed -i "s/^CLOUDFLARE_TUNNEL_TOKEN=.*/CLOUDFLARE_TUNNEL_TOKEN=\"${CF_TUNNEL_TOKEN}\"/g" "$ENV_FILE"
-        fi
+    # 3. Daftarkan Parameter Baru ke AWS SSM jika diisi
+    if [ -n "$CF_TOKEN" ]; then
+        echo "-> Mendaftarkan Cloudflare API Token ke AWS SSM..."
+        aws ssm put-parameter \
+        --name "${PREFIX}/CLOUDFLARE_API_TOKEN" \
+        --value "$CF_TOKEN" \
+        --type "SecureString" \
+        --overwrite \
+        --region "$AWS_REGION"
+    elif [ $CF_EXISTS -eq 0 ]; then
+        echo "ERROR: Cloudflare API Token tidak boleh kosong karena belum ada di SSM." >&2
+        exit 1
     else
-        mkdir -p "$(dirname "$ENV_FILE")"
-        echo "CLOUDFLARE_TUNNEL_TOKEN=\"${CF_TUNNEL_TOKEN}\"" > "$ENV_FILE"
+        echo "-> Menggunakan Cloudflare API Token yang sudah ada di SSM."
     fi
-elif [ $CF_TUNNEL_EXISTS -eq 1 ]; then
-    echo "-> Menggunakan Cloudflare Tunnel Token yang sudah ada di SSM."
-fi
 
-echo "SUCCESS: Kredensial siap digunakan."
+    if [ -n "$TS_KEY" ]; then
+        echo "-> Mendaftarkan Tailscale Auth Key ke AWS SSM..."
+        aws ssm put-parameter \
+        --name "${PREFIX}/TAILSCALE_AUTH_KEY" \
+        --value "$TS_KEY" \
+        --type "SecureString" \
+        --overwrite \
+        --region "$AWS_REGION"
+    elif [ $TS_EXISTS -eq 0 ]; then
+        echo "ERROR: Tailscale Auth Key tidak boleh kosong karena belum ada di SSM." >&2
+        exit 1
+    else
+        echo "-> Menggunakan Tailscale Auth Key yang sudah ada di SSM."
+    fi
+
+    if [ -n "$CF_TUNNEL_TOKEN" ]; then
+        echo "-> Mendaftarkan Cloudflare Tunnel Token ke AWS SSM..."
+        aws ssm put-parameter \
+        --name "${PREFIX}/CLOUDFLARE_TUNNEL_TOKEN" \
+        --value "$CF_TUNNEL_TOKEN" \
+        --type "SecureString" \
+        --overwrite \
+        --region "$AWS_REGION"
+
+        # Simpan Cloudflare Tunnel Token ke .env lokal
+        if [ -f "$ENV_FILE" ]; then
+            if ! grep -q "^CLOUDFLARE_TUNNEL_TOKEN=" "$ENV_FILE"; then
+                echo "CLOUDFLARE_TUNNEL_TOKEN=\"${CF_TUNNEL_TOKEN}\"" >> "$ENV_FILE"
+            else
+                sed -i "s/^CLOUDFLARE_TUNNEL_TOKEN=.*/CLOUDFLARE_TUNNEL_TOKEN=\"${CF_TUNNEL_TOKEN}\"/g" "$ENV_FILE"
+            fi
+        else
+            mkdir -p "$(dirname "$ENV_FILE")"
+            echo "CLOUDFLARE_TUNNEL_TOKEN=\"${CF_TUNNEL_TOKEN}\"" > "$ENV_FILE"
+        fi
+    elif [ $CF_TUNNEL_EXISTS -eq 1 ]; then
+        echo "-> Menggunakan Cloudflare Tunnel Token yang sudah ada di SSM."
+    fi
+
+    echo "SUCCESS: Kredensial siap digunakan."
+fi
 
 # 4. Ambil output infrastruktur dari Terraform
 echo ""
 echo "-> Membaca output Terraform..."
-if [ ! -f "${TERRAFORM_DIR}/terraform.tfstate" ]; then
-    echo "WARNING: terraform.tfstate tidak ditemukan. Pastikan Anda sudah menjalankan terraform apply." >&2
-    exit 1
-fi
+if [ -z "${S3_BUCKET:-}" ] || [ -z "${BASTION_INSTANCE_ID:-}" ]; then
+    if [ ! -f "${TERRAFORM_DIR}/terraform.tfstate" ]; then
+        echo "WARNING: terraform.tfstate tidak ditemukan. Pastikan Anda sudah menjalankan terraform apply." >&2
+        exit 1
+    fi
 
-S3_BUCKET=$(terraform -chdir="${TERRAFORM_DIR}" output -raw s3_bucket)
-BASTION_INSTANCE_ID=$(terraform -chdir="${TERRAFORM_DIR}" output -raw applayer_instance_id)
+    S3_BUCKET=$(terraform -chdir="${TERRAFORM_DIR}" output -raw s3_bucket)
+    BASTION_INSTANCE_ID=$(terraform -chdir="${TERRAFORM_DIR}" output -raw applayer_instance_id)
 
-if [ -z "$S3_BUCKET" ] || [ -z "$BASTION_INSTANCE_ID" ] || [ "$S3_BUCKET" = "No outputs found" ]; then
-    echo "ERROR: Gagal membaca output dari Terraform. Pastikan resources sudah di-apply." >&2
-    exit 1
+    if [ -z "$S3_BUCKET" ] || [ -z "$BASTION_INSTANCE_ID" ] || [ "$S3_BUCKET" = "No outputs found" ]; then
+        echo "ERROR: Gagal membaca output dari Terraform. Pastikan resources sudah di-apply." >&2
+        exit 1
+    fi
 fi
 
 echo "S3 Bucket: ${S3_BUCKET}"
@@ -158,7 +167,7 @@ COMMAND_ID=$(aws ssm send-command \
     \"aws s3 cp s3://${S3_BUCKET}/scripts/init.sql /home/ec2-user/iot-bigdata-project/db/init.sql --region ${AWS_REGION}\",
     \"chmod +x /home/ec2-user/iot-bigdata-project/infra/scripts/*.sh\",
     \"chown -R ec2-user:ec2-user /home/ec2-user/iot-bigdata-project\",
-    \"sudo -i -u ec2-user /home/ec2-user/iot-bigdata-project/infra/scripts/sync-packages-to-s3.sh\"
+    \"sudo -i -u ec2-user /home/ec2-user/iot-bigdata-project/infra/scripts/sync-packages-to-s3.sh ${ENV} ${PROJECT_NAME}\"
   ]}" \
   --region "$AWS_REGION" \
   --query "Command.CommandId" \

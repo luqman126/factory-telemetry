@@ -104,6 +104,13 @@ resource "aws_iam_role_policy" "least_privilege" {
 }
 
 # ---- 2. EC2 Instance: Applayer-1 (Bastion + Apps) ----
+
+# ---- Dynamically computes the subdomain name ----
+# If environment is production, use mqtt.chescloud.my.id; otherwise staging-mqtt.chescloud.my.id
+locals {
+  mqtt_subdomain = var.environment == "production" ? "mqtt.${var.domain_name}" : "${var.environment}-mqtt.${var.domain_name}"
+}
+
 # Ditempatkan di Public Subnet agar bisa diakses oleh client / IoT Device
 resource "aws_instance" "applayer" {
   ami                         = var.ami_id
@@ -180,6 +187,12 @@ curl -SL https://github.com/docker/compose/releases/download/v2.26.1/docker-comp
 chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
 # 2.5 Tarik provisioning scripts dari S3 agar folder scripts lokal di Bastion langsung terisi lengkap
+log "Waiting for scripts to be uploaded to S3..."
+until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/scripts/deploy-mqtt-cert.sh --region ${var.aws_region} &>/dev/null; do
+  log "Still waiting for scripts in s3..."
+  sleep 10
+done
+
 log "Downloading provisioning scripts from S3..."
 mkdir -p /home/ec2-user/iot-bigdata-project/infra/scripts
 aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/iot-bigdata-project/infra/scripts/ --recursive --region ${var.aws_region}
@@ -228,14 +241,14 @@ dns_cloudflare_api_token = $CF_TOKEN
 SEC
     chmod 600 /etc/letsencrypt/cloudflare.ini
     
-    # Jalankan Certbot DNS-01 challenge untuk domain staging dengan deploy-hook untuk auto-renewal
+    # Jalankan Certbot DNS-01 challenge untuk domain staging / production dengan deploy-hook untuk auto-renewal
     certbot certonly --dns-cloudflare \
       --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
-      -d "staging-mqtt.${var.domain_name}" \
+      -d "${local.mqtt_subdomain}" \
       --email "admin@${var.domain_name}" \
       --agree-tos --no-eff-email \
       --non-interactive \
-      --deploy-hook "/home/ec2-user/iot-bigdata-project/infra/scripts/deploy-mqtt-cert.sh staging-mqtt.${var.domain_name}"
+      --deploy-hook "/home/ec2-user/iot-bigdata-project/infra/scripts/deploy-mqtt-cert.sh ${local.mqtt_subdomain}"
 fi
 
 # 6. Install & Configure Cloudflare Tunnel (cloudflared)
@@ -253,6 +266,18 @@ fi
 
 log "Applayer bootstrap finished."
 EOF
+
+  # Execute local-bootstrap after applayer instance and S3 bucket is ready
+  provisioner "local-exec" {
+    command = "bash ${path.module}/../scripts/local-bootstrap.sh --post-apply"
+    environment = {
+      AWS_REGION          = var.aws_region
+      S3_BUCKET           = aws_s3_bucket.datalake.id
+      BASTION_INSTANCE_ID = self.id
+      ENV                 = var.environment
+      PROJECT_NAME        = var.project_name
+    }
+  }
 
   root_block_device {
     volume_size           = var.ebs_volume_size

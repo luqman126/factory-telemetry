@@ -10,7 +10,8 @@
 set -euo pipefail
 
 ENV="${1:-staging}"
-PREFIX="/iot-bigdata/${ENV}/"
+PROJECT_NAME="${2:-iot-bigdata}"
+PREFIX="/${PROJECT_NAME}/${ENV}/"
 OUTPUT_FILE="$(dirname "$0")/../.env"
 
 echo "=== Fetching Secrets from AWS SSM Parameter Store ==="
@@ -27,7 +28,7 @@ aws ssm get-parameters-by-path \
   --path "${PREFIX}" \
   --recursive \
   --with-decryption \
-  --region ap-southeast-1 \
+  --region ${AWS_REGION:-ap-southeast-1} \
   --query "Parameters[*]" \
   --output json | python3 -c '
 import sys, json

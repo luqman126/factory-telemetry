@@ -120,8 +120,17 @@ def update_device_sensors(device: dict):
     # Calculate S-curve acceleration factor based on ticks (thermal inertia)
     acceleration = math.tanh(dev_state["state_ticks"] / 5.0)
 
-    # 1. Base day/night oscillation (62.8 minutes cycle for visibility on charts)
-    time_osc = 2.0 * math.sin(time.time() / 600.0)
+    # 1. Base day/night oscillation (24 hours cycle for visibility on charts)
+    now = datetime.now()
+    seconds_today = (
+        now.hour * 3600 +
+        now.minute * 60 +
+        now.second
+    )
+    DAY_SECONDS = 24 * 60 * 60
+    phase_shift = -2 * math.pi / 3 # Peaks at 02:00 PM
+
+    time_osc = 2.0 * math.sin(2 * math.pi * seconds_today / DAY_SECONDS + phase_shift)
 
     if dev_state["state"] == "NORMAL":
         # Fluctuates naturally around baseline + oscillation

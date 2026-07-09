@@ -36,3 +36,6 @@ worker_ami_id = "ami-03256949a823ccf8b"
 # Nama EC2 Key Pair yang sudah terdaftar di AWS Console region ap-southeast-1
 # Contoh: "iot-worker-key" atau key pair lain milik Anda
 key_pair_name = "iot-bigdata-key"
+
+# ---- Dynamic logging system ---- 
+log_level = "INFO"

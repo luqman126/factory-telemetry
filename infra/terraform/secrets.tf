@@ -151,41 +151,38 @@ resource "aws_ssm_parameter" "telegram_chat_id_server" {
   description = "Telegram chat ID for server health alarms"
 }
 
-# ---- External/Dynamic Credentials (Managed via local-bootstrap.sh) ----
+# ---- External/Dynamic Credentials (Managed via secrets.auto.tfvars) ----
 resource "aws_ssm_parameter" "cloudflare_api_token" {
   name        = "/${var.project_name}/${var.environment}/CLOUDFLARE_API_TOKEN"
   type        = "SecureString"
-  value       = "placeholder_do_not_delete"
+  value       = var.cloudflare_api_token
   description = "Cloudflare API token for Certbot DNS challenge"
   overwrite   = true
-
-  lifecycle {
-    ignore_changes = [value]
-  }
 }
 
 resource "aws_ssm_parameter" "tailscale_auth_key" {
   name        = "/${var.project_name}/${var.environment}/TAILSCALE_AUTH_KEY"
   type        = "SecureString"
-  value       = "placeholder_do_not_delete"
+  value       = var.tailscale_auth_key
   description = "Tailscale auth key for VPN registration"
   overwrite   = true
-
-  lifecycle {
-    ignore_changes = [value]
-  }
 }
 
 resource "aws_ssm_parameter" "cloudflare_tunnel_token" {
   name        = "/${var.project_name}/${var.environment}/CLOUDFLARE_TUNNEL_TOKEN"
   type        = "SecureString"
-  value       = "placeholder_do_not_delete"
+  value       = var.cloudflare_tunnel_token
   description = "Cloudflare Tunnel Token for Grafana remote access"
   overwrite   = true
+}
 
-  lifecycle {
-    ignore_changes = [value]
-  }
+# ---- Dynamic logging system ---- 
+resource "aws_ssm_parameter" "log_level" {
+  name        = "/${var.project_name}/${var.environment}/LOG_LEVEL"
+  type        = "String"
+  value       = var.log_level
+  description = "Logging level configuration (DEBUG / INFO / WARNING / ERROR)"
+  overwrite   = true
 }
 
 # ---- Spark Ephemeral Worker SSM Parameters ----
