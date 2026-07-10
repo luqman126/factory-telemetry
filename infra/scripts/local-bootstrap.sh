@@ -161,6 +161,24 @@ echo "-> Menyalin script dan file skema database ke S3..."
 aws s3 cp "${PROJECT_DIR}/infra/scripts/" "s3://${ORIG_S3_BUCKET}/scripts/" --recursive --region "$ORIG_AWS_REGION"
 aws s3 cp "${PROJECT_DIR}/db/init.sql" "s3://${ORIG_S3_BUCKET}/scripts/init.sql" --region "$ORIG_AWS_REGION"
 
+# 5.5 Waiting for SSM Agent in bastion to be active dan registered in online state
+echo ""
+echo "-> Waiting for SSM Agent to be ready"
+for attempt in {1..30}; do
+    STATUS=$(aws ssm describe-instance-information \
+      --filters "Key=InstanceIds,Values=$ORIG_BASTION_INSTANCE_ID" \
+      --region "$ORIG_AWS_REGION" \
+      --query "InstanceInformationList[0].PingStatus" \
+      --output text 2>/dev/null || echo "Offline")
+
+    if [ "$STATUS" = "Online" ]; then
+        echo "SSM Agent is Online and registered!"
+        break
+    fi
+    echo "SSM Agent is still offline (attempt $attempt/30), retrying in 10 seconds..."
+    sleep 10
+done
+
 # 6. Jalankan Sinkronisasi RPM, script, dan init.sql di Bastion secara remote via AWS SSM Run Command
 echo ""
 echo "-> Memicu sinkronisasi paket RPM dan secrets di Bastion via AWS SSM..."
@@ -211,6 +229,7 @@ if [ "$STATUS" != "Success" ]; then
       --region "$ORIG_AWS_REGION" \
       --query "StandardErrorContent" \
       --output text
+    exit 1
 fi
 
 echo ""

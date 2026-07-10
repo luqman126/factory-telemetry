@@ -102,4 +102,6 @@ else
     echo "WARNING: Failed to fetch database credentials from SSM. S3 database configuration step skipped."
 fi
 
+echo "-> Uploading sync completion flag to S3..."
+aws s3api put-object --bucket "${S3_BUCKET}" --key "packages/sync_complete.flag"
 echo "=== Package & Script Sync to S3 Completed successfully ==="

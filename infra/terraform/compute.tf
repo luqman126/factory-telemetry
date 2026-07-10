@@ -304,12 +304,13 @@ resource "aws_eip" "applayer" {
 # ---- 3. EC2 Instance: Datalayer-1 (PostgreSQL DB Primary) ----
 # Ditempatkan di Private Subnet, menggunakan static IP untuk kemudahan replikasi
 resource "aws_instance" "datalayer_primary" {
-  ami                  = var.ami_id
-  instance_type        = var.datalayer_instance_type
-  subnet_id            = aws_subnet.private.id
-  key_name             = var.key_pair_name
-  private_ip           = cidrhost(var.private_subnet_cidr, 10) # Contoh: 10.1.2.10
-  iam_instance_profile = aws_iam_instance_profile.applayer.name
+  ami                         = var.ami_id
+  instance_type               = var.datalayer_instance_type
+  subnet_id                   = aws_subnet.private.id
+  key_name                    = var.key_pair_name
+  private_ip                  = cidrhost(var.private_subnet_cidr, 10) # Contoh: 10.1.2.10
+  iam_instance_profile        = aws_iam_instance_profile.applayer.name
+  user_data_replace_on_change = true
 
   vpc_security_group_ids = [
     aws_security_group.datalayer.id
@@ -317,9 +318,9 @@ resource "aws_instance" "datalayer_primary" {
 
   user_data = <<EOF
 #!/bin/bash
-# 1. Tunggu hingga RPM dan script tersedia di S3 (diunggah oleh local-bootstrap.sh)
-until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/packages/ | grep -q '\.rpm'; do
-    echo "Waiting for packages in S3..."
+# 1. Tunggu hingga semua RPM dan script tersedia di S3 (diunggah oleh local-bootstrap.sh)
+until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/packages/sync_complete.flag --region ${var.aws_region} &>/dev/null; do
+    echo "Waiting for package sync to complete in S3..."
     sleep 10
 done
 
@@ -373,12 +374,13 @@ EOF
 # ---- 4. EC2 Instance: Datalayer-2 (PostgreSQL DB Replica) ----
 # Ditempatkan di Private Subnet, menggunakan static IP
 resource "aws_instance" "datalayer_replica" {
-  ami                  = var.ami_id
-  instance_type        = var.datalayer_instance_type
-  subnet_id            = aws_subnet.private.id
-  key_name             = var.key_pair_name
-  private_ip           = cidrhost(var.private_subnet_cidr, 20) # Contoh: 10.1.2.20
-  iam_instance_profile = aws_iam_instance_profile.applayer.name
+  ami                         = var.ami_id
+  instance_type               = var.datalayer_instance_type
+  subnet_id                   = aws_subnet.private.id
+  key_name                    = var.key_pair_name
+  private_ip                  = cidrhost(var.private_subnet_cidr, 20) # Contoh: 10.1.2.20
+  iam_instance_profile        = aws_iam_instance_profile.applayer.name
+  user_data_replace_on_change = true
 
   vpc_security_group_ids = [
     aws_security_group.datalayer.id
@@ -386,9 +388,9 @@ resource "aws_instance" "datalayer_replica" {
 
   user_data = <<EOF
 #!/bin/bash
-# 1. Tunggu hingga RPM dan script tersedia di S3
-until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/packages/ | grep -q '\.rpm'; do
-    echo "Waiting for packages in S3..."
+# 1. Tunggu hingga semua RPM dan script tersedia di S3 (diunggah oleh local-bootstrap.sh)
+until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/packages/sync_complete.flag --region ${var.aws_region} &>/dev/null; do
+    echo "Waiting for package sync to complete in S3..."
     sleep 10
 done
 
