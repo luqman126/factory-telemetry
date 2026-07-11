@@ -1,424 +1,319 @@
-# iot-bigdata-project
+# IoT Big Data: Factory Telemetry & Control Pipeline
 
-Sistem monitoring manufaktur berbasis IoT dengan pipeline big data end-to-end, mulai dari ingestion data sensor secara real-time, penyimpanan time-series, batch analytics menggunakan Apache Spark, hingga visualisasi di Grafana.
+An end-to-end IoT telemetry ingestion, processing, and closed-loop control system built on AWS with self-hosted open-source components. Designed to monitor factory environments in real time, trigger actuator responses within milliseconds, and archive sensor data for long-term analytics.
 
----
-
-## Latar Belakang
-
-Sistem ini memonitor kondisi tiga ruangan di lingkungan manufaktur secara real-time menggunakan sensor suhu, kelembaban, getaran, dan kadar uap gas. Data yang terkumpul dianalisis secara batch menggunakan Apache Spark untuk menghasilkan insight seperti tren anomali, agregasi per device, dan perbandingan kondisi antar ruangan.
-
-Project ini sekaligus menjadi eksperimen distributed computing dengan membandingkan performa Apache Spark dalam berbagai skenario jumlah worker.
-
----
-
-## Ruangan yang Dimonitor
-
-| Ruangan              | Sensor                  | Aktuator                    |
-|----------------------|-------------------------|-----------------------------|
-| Ruang Produksi Utama | DHT22, MPU6050          | LED, Buzzer                 |
-| Ruang Penyolderan    | DHT22, MQ-135           | LED, Buzzer, Motor Fan DC   |
-| Ruang Penyimpanan    | DHT22                   | LED, Buzzer                 |
-
-> Hardware: ESP32 (x1), Relay. Device fisik masih dalam pengembangan — saat ini menggunakan simulator.
+### Project Highlights
+- **✔ Secure MQTT over TLS** on port 8883 with Mosquitto broker
+- **✔ High Availability TimescaleDB Replication** with active streaming slots
+- **✔ Apache Spark Batch Analytics** for hourly aggregation and anomaly detection
+- **✔ Amazon S3 Data Lake** with compressed Parquet archival
+- **✔ Infrastructure as Code** via Terraform (VPC, IAM, compute, networking)
+- **✔ Observability with Grafana** including Prometheus, Alloy agents, and Telegram alerts
+- **✔ GitHub Actions Deployment** with Tailscale VPN integration
+- **✔ Private AWS Networking** with air-gapped database nodes in isolated subnets
 
 ---
 
-## Arsitektur
+## Project Overview
 
-### 1. Aliran Data Utama (Sistem Big Data)
+This project builds a full-stack IoT monitoring pipeline for a simulated manufacturing facility. Sensors across three factory zones continuously stream temperature, vibration, and gas readings to a cloud backend over MQTT. The backend validates, stores, and analyzes the data in real time, and when a dangerous condition is detected (e.g., overheating), it publishes a control command back to the device within milliseconds.
 
-```text
- ┌────────────────────────┐
- │ IoT Device / Simulator │
- └──────────┬─────────────┘
-            │ MQTT (TLS: Port 8883)
-            ▼
- ┌────────────────────────┐
- │    FastAPI Backend     │
- │      (applayer-1)      │
- └──────────┬─────────────┘
-            │ 1. Insert data sensor mentah (real-time)
-            ▼
- ┌────────────────────────┐
- │  Postgres TimescaleDB  │◄── 5. JDBC Write ──┐
- │   Primary (datalayer-1)│     (Agregasi/     │
- └──────────┬─────────────┘      Anomali)      │
-            │                                  │
-            │ 2. Streaming                     │
-            │    Replication                   │
-            ▼                                  │
- ┌────────────────────────┐                    │
- │  Postgres TimescaleDB  │                    │
- │   Replica (datalayer-2)│                    │
- └──────────┬─────────────┘                    │
-            │                                  │
-            │ 3. Export                        │
-            │    (Hourly Parquet)              │
-            ▼                                  │
- ┌────────────────────────┐                    │
- │ Amazon S3 (Data Lake)  │                    │
- └──────────┬─────────────┘                    │
-            │                                  │
-            │ 4. Read (s3a://)                 │
-            ▼                                  │
- ┌────────────────────────┐                    │
- │      Apache Spark      ├────────────────────┘
- │   Local (applayer-1)   │
- └────────────────────────┘
+The raw telemetry is stored in a TimescaleDB time-series database with automatic partitioning. For long-term retention and heavy analytical workloads, data is exported hourly to Amazon S3 as compressed Parquet files and processed by Apache Spark batch jobs running on ephemeral workers.
+
+The entire infrastructure (networking, compute, security, secrets) is defined as Terraform code and can be deployed from scratch with a single command.
+
+---
+
+## Why This Project? (Design Philosophy)
+
+### The Use Case
+
+The system monitors three operational zones inside a factory:
+
+| Zone | Sensors | Business Risk |
+|:---|:---|:---|
+| **Production Area** (`ruang_produksi`) | Temperature, Vibration (MPU6050) | Machine overheating or bearing wear halts the assembly line |
+| **Soldering Area** (`ruang_penyolderan`) | Temperature, Gas/VOC (MQ-135) | Toxic flux fumes endanger worker health and violate safety regulations |
+| **Storage Area** (`ruang_penyimpanan`) | Temperature | Excessive heat damages stored components and raw materials |
+
+The factory needs:
+- **Instant reaction**: If a soldering station overheats, the cooling fan must activate in milliseconds, not minutes.
+- **Audit trail**: Regulatory bodies require months of environmental records, but storing raw high-frequency data in a database indefinitely is financially unsustainable.
+- **Minimal downtime**: The monitoring system itself cannot be a single point of failure. If the database goes down, a hot standby must take over without data loss.
+
+### Why Self-Hosted Instead of Managed Services?
+
+This project deliberately uses self-hosted open-source components instead of managed cloud services (RDS, EMR, IoT Core) to demonstrate deep systems engineering knowledge:
+
+| Our Decision | Production Alternative | What We Demonstrate |
+|:---|:---|:---|
+| PostgreSQL + TimescaleDB on EC2 | Amazon RDS / Aurora | Streaming replication configuration, WAL management, manual failover procedures |
+| Spark on EC2 with bash orchestration | AWS EMR / Glue | Ephemeral worker lifecycle, coordination overhead analysis, Amdahl's Law benchmarking |
+| Docker Compose on a single host | ECS / EKS (Kubernetes) | Container networking, volume persistence, service dependency management |
+| Self-hosted Mosquitto | AWS IoT Core / HiveMQ Cloud | TLS certificate provisioning, ACL enforcement, pub/sub topic architecture |
+
+> In a production environment, managed services would be preferred for operational efficiency. The engineering skills demonstrated here (configuring replication slots, debugging VPC routing, analyzing distributed computing overhead) transfer directly to operating and debugging those managed platforms.
+
+---
+
+## System Architecture
+
+### Telemetry Ingestion & Closed-Loop Control
+```mermaid
+---
+config:
+  layout: dagre
+---
+flowchart BT
+ subgraph edge["🟣 Edge Layer"]
+    direction TB
+        Edge["IoT Simulator"]
+        Fan["Cooling Fan"]
+  end
+ subgraph pub["🟢 Public Subnet"]
+    direction TB
+        Broker["Mosquitto Broker"]
+        Backend["FastAPI Backend"]
+  end
+ subgraph priv["🔵 Private Subnet"]
+    direction TB
+        DB["TimescaleDB Primary"]
+  end
+    Edge -- "1. Publish telemetry" --> Broker
+    Broker -- "2. Deliver message" --> Backend
+    Backend -- "3. INSERT raw reading" --> DB
+    Backend -- "4. Publish fan ON" --> Broker
+    Broker -- "5. Deliver command" --> Edge
+    Edge -. "6. Activate cooling" .-> Fan
+
+     Edge:::edge
+     Fan:::edge
+     Broker:::public
+     Backend:::public
+     DB:::private
+    classDef public fill:#d4edda,stroke:#28a745,color:#155724
+    classDef private fill:#cce5ff,stroke:#007bff,color:#004085
+    classDef edge fill:#e2d5f1,stroke:#6f42c1,color:#4a2882
 ```
 
-### 2. Alur Monitoring & Dashboard Visualisasi
+### Infrastructure Topology
+```mermaid
+graph TD
+    subgraph pub["🟢 Public Subnet (10.x.1.0/24)"]
+        A[FastAPI + MQTT Consumer]
+        B[Mosquitto Broker]
+        C[Spark Master]
+        D[Prometheus + Grafana]
+    end
 
-```text
- ┌──────────────────────────────────────────────────────────────┐
- │                  Grafana Alloy Host Agent                    │
- │  (Terinstall di: applayer-1, datalayer-1, & datalayer-2)     │
- └──────────────────────────────┬───────────────────────────────┘
-                                │
-                                │ 8. Push Metrics (remote_write)
-                                ▼
- ┌──────────────────────────────────────────────────────────────┐
- │                Prometheus Server (applayer-1)                │
- └──────────────────────────────┬───────────────────────────────┘
-                                │
-                                │ 7. Query Metrics
-                                ▼
- ┌──────────────────────────────────────────────────────────────┐
- │                  Grafana Dashboard (applayer-1)              │
- └──────────────────────────────▲───────────────────────────────┘
-                                │
-                                │ 6. Query Analytics & Raw Data
-                                │
- ┌──────────────────────────────┴───────────────────────────────┐
- │               TimescaleDB Primary (datalayer-1)              │
- └──────────────────────────────────────────────────────────────┘
+    subgraph priv["🔵 Private Subnet (10.x.2.0/24)"]
+        E[TimescaleDB Primary] <-->|Streaming Replication| F[TimescaleDB Standby]
+        G[Ephemeral Spark Workers]
+    end
+
+    subgraph aws["🟠 AWS Managed Services"]
+        S3[(S3 Data Lake)]
+    end
+
+    Edge[🟣 IoT Simulator] -->|TLS 8883| B
+    B --> A
+    A -->|Write| E
+    F -->|Export Parquet| S3
+    S3 -->|Read via VPC Endpoint| G
+    G -->|Write analytics| E
+    D -->|Query| E
+
+    classDef public fill:#d4edda,stroke:#28a745,color:#155724
+    classDef private fill:#cce5ff,stroke:#007bff,color:#004085
+    classDef awsService fill:#fff3cd,stroke:#ffc107,color:#856404
+    classDef edge fill:#e2d5f1,stroke:#6f42c1,color:#4a2882
+    classDef monitor fill:#fff8e1,stroke:#f9a825,color:#5d4037
+
+    class A,B,C public
+    class D monitor
+    class E,F private
+    class G private
+    class S3 awsService
+    class Edge edge
 ```
 
 ---
 
-## Infrastruktur Cloud
+## Infrastructure
 
-```text
-AWS ap-southeast-1 (Singapore)
-└── VPC: 10.0.0.0/16
-    ├── Public Subnet: 10.0.1.0/24
-    │   └── iot-bigdata-applayer-1 — c7i-flex.large (always-on)
-    │       ├── FastAPI Backend & MQTT consumer
-    │       ├── Mosquitto MQTT broker (Port TLS 8883)
-    │       ├── Grafana + Telegram Alerting
-    │       ├── Prometheus Server
-    │       ├── Grafana Alloy agent
-    │       ├── Spark Master (Local execution engine)
-    │       ├── Cloudflare Tunnel → grafana.chescloud.my.id
-    │       └── Tailscale (Bastion Host / SSH entry point)
-    │
-    └── Private Subnet: 10.0.2.0/24 (tanpa akses internet)
-        ├── iot-bigdata-datalayer-1 — t3.small (always-on)
-        │   ├── PostgreSQL PRIMARY (TimescaleDB, bare-metal)
-        │   └── Grafana Alloy agent (dengan Postgres exporter)
-        │
-        ├── iot-bigdata-datalayer-2 — t3.small (always-on)
-        │   ├── PostgreSQL STANDBY (streaming replication, read-only)
-        │   └── Grafana Alloy agent (dengan Postgres exporter)
-        │
-        └── Worker Nodes — t3.small (ephemeral)
-            └── Spark Worker (Auto launch/terminate via run_with_worker.sh)
+### AWS Network Topology
 
-Akses:
-├── User    → Cloudflare Tunnel → grafana.chescloud.my.id
-├── Admin   → Tailscale SSH → applayer-1 (Bastion) → jump ke 10.0.2.x
-├── DB sync → internal VPC only (10.0.2.x)
-└── S3      → VPC Gateway Endpoint (gratis, tanpa internet)
-```
+The infrastructure runs on a custom VPC with public and private subnets in `ap-southeast-1`:
+
+| Subnet | CIDR | What Lives Here | Internet Access |
+|:---|:---|:---|:---|
+| **Public** (`10.x.1.0/24`) | Bastion / App host | Mosquitto, FastAPI, Grafana, Spark Master | Yes (via Internet Gateway) |
+| **Private** (`10.x.2.0/24`) | Database + Workers | TimescaleDB Primary, Standby, Spark Workers | None (air-gapped) |
+
+### Security Boundaries
+- Database nodes have **no public IP** and **zero internet routing**. All S3 communication goes through the free VPC Gateway Endpoint over AWS internal fiber.
+- SSH access to private nodes is only possible by jumping through the Bastion host, which requires Tailscale VPN authentication.
+- Grafana dashboards are exposed via Cloudflare Tunnel, so no raw web ports are open to the public internet.
+
+### Deployment Flow
+Infrastructure is provisioned entirely through Terraform. On `terraform apply`, a `local-exec` provisioner automatically:
+1. Uploads provisioning scripts and database packages to S3.
+2. Waits for the Bastion's SSM agent to come online.
+3. Triggers remote package synchronization via AWS SSM Run Command.
+4. Database nodes poll S3 for the completion flag, then install and configure PostgreSQL, TimescaleDB, and streaming replication autonomously.
 
 ---
 
-## Tech Stack
+## Technology Stack
 
-| Layer          | Teknologi                              | Keterangan |
-|----------------|----------------------------------------|------------|
-| Ingestion      | FastAPI, Paho MQTT                     | API ingest data & broker consumer |
-| Message Broker | Eclipse Mosquitto                      | MQTT broker dengan TLS port 8883 |
-| Database       | PostgreSQL 16 + TimescaleDB            | Penyimpanan data time-series ter-hypertable |
-| Replikasi DB   | PostgreSQL Streaming Replication       | Sinkronisasi primary-standby secara real-time |
-| Data Lake      | Amazon S3 (format Parquet, s3a://)     | Penyimpanan data batch terkompresi |
-| Processing     | Apache Spark 3.5.8 (PySpark)           | Mesin analisis agregasi & anomali |
-| Monitoring     | Prometheus Server & Grafana Alloy      | Pengumpul & penyimpan metrik host + database |
-| Visualisasi    | Grafana + Telegram Alerting            | Dashboard server & data analitik |
-| Infra lokal    | WSL, Docker, Docker Compose            | Development environment |
-| Infra cloud    | AWS EC2, VPC, S3, IAM, VPC Endpoint  | Cloud infrastructure |
-| Akses & Tunnel | Cloudflare Tunnel, Tailscale           | Secure tunnel & VPN admin (Bastion) |
-| Automasi       | Bash, AWS CLI, Systemd Timer           | Script provisioning & orkestrator pipeline |
-| Bahasa         | Python 3.12                            | Backend & PySpark scripting |
+| Category | Technologies |
+|:---|:---|
+| **Languages** | Python 3.12, SQL, Bash, HCL |
+| **Backend** | FastAPI, Pydantic, Paho MQTT, Uvicorn |
+| **Database** | PostgreSQL 16, TimescaleDB 2.x (hypertables + retention policies) |
+| **Analytics** | Apache Spark 3.5, PySpark |
+| **Broker** | Eclipse Mosquitto (MQTT over TLS) |
+| **Cloud** | AWS EC2, S3, IAM, SSM Parameter Store, VPC Gateway Endpoints |
+| **Infrastructure** | Terraform, Docker Compose, Tailscale VPN, Cloudflare Tunnel |
+| **Monitoring** | Prometheus, Grafana, Grafana Alloy, Postgres Exporter |
+| **CI/CD** | GitHub Actions |
 
 ---
 
-## Sensor yang Dimonitor
+## Performance Evaluation
 
-| Sensor | Field | Tipe Data | Keterangan / Rentang Nilai |
-|---|---|---|---|
-| Suhu (DHT22) | `temperature` | Float | Suhu ruangan dalam Celsius (°C) [-10.0 s/d 100.0] |
-| Kelembaban (DHT22) | `humidity` | Float | Kelembaban relatif dalam %RH [0.0 s/d 100.0] |
-| Accelerometer (MPU6050) | `accel_x`, `accel_y`, `accel_z` | Float | Percepatan gerak sudut per axis (m/s²) |
-| Getaran (MPU6050) | `vibration_rms` | Float | Nilai RMS getaran fisik (m/s²) [>= 0] |
-| Uap Gas (MQ-135) | `flux_ppm` | Float | Kadar uap gas terdeteksi (ppm) [>= 0] |
-| Kualitas Udara (MQ-135) | `flux_aqi` | Integer | Indeks kualitas udara (AQI) [0 s/d 500] |
-| Kategori VOC (MQ-135) | `voc_level` | String | Kategori tingkat gas: `GOOD`, `MODERATE`, `UNHEALTHY`, `HAZARDOUS` |
+> *This section is updated as new benchmarks are conducted.*
 
----
+Benchmarks were executed on AWS `t3.small` nodes (1 vCPU, 2GB RAM) with 1,000,000 synthetic records (~64MB Parquet).
 
-## Hasil Eksperimen Spark Scaling
+| Scenario | Workers | Avg Duration |
+|:---|:---|:---|
+| Local Mode | 0 | **28.56 s** |
+| 1 Distributed Worker | 1 | **42.47 s** |
+| 2 Distributed Workers | 2 | **44.13 s** |
 
-Eksperimen membandingkan execution time Spark batch job pada arsitektur baru (ARCH-001) dengan berbagai jumlah worker. Job mencakup: read Parquet dari S3, aggregasi per device, anomaly detection, dan distributed JDBC write.
+**Finding: Negative Scaling.** For datasets smaller than single-node RAM capacity, distributed coordination overhead (JVM startup, network shuffles, S3 API latency) exceeds the parallel computation benefit. Ephemeral scaling becomes cost-effective only when dataset sizes exceed the memory limits of the master node.
 
-### Dataset
-
-- **Records:** 1.000.000
-- **Format:** Parquet di S3 (~64 MB)
-- **Devices:** 20
-- **Time span:** 30 hari
-
-### Hasil
-
-| Skenario        | Workers | Samples | Min      | Avg       | Max       |
-|-----------------|---------|---------|----------|-----------|-----------|
-| Local mode      | 0       | 5       | 27.45 s  | 28.56 s   | 30.33 s   |
-| 1 worker        | 1       | 4       | 42.30 s  | 42.47 s   | 42.63 s   |
-| 2 worker        | 2       | 1*      | 44.13 s  | 44.13 s   | 44.13 s   |
-
-> *) 2 worker memiliki variance ekstrem — beberapa run sukses (~44s), sebagian lain stuck > 5 menit hingga di-batalkan. Hasil ini sendiri menjadi temuan eksperimen.
-
-### Analisis
-
-Pada skala 1M records dengan worker constraint (t3.small, 2GB RAM, 30GB EBS), distributed Spark menunjukkan **negative scaling**:
-
-- Local mode (28s) lebih cepat dari mode dengan worker (42-44s).
-- Penambahan worker dari 1 ke 2 tidak memberikan speedup, justru menambah variance.
-- Run dengan 3 worker konsisten gagal (disk space / executor heartbeat timeout).
-
-Penyebab fundamental:
-
-1. **Network & coordination overhead** — Spark butuh distribute jars (~250MB), shuffle data antar executor, koordinasi master-worker. Untuk dataset 64MB, biaya ini > benefit parallelism.
-2. **JDBC write contention** — `coalesce(2)` + multiple worker = paralel write ke 1 DB primary.
-3. **Hardware constraint** — t3.small (2GB RAM) tidak memberikan ruang yang cukup untuk caching + shuffle, memaksa spill ke disk.
-
-Hasil ini konsisten dengan **Amdahl's Law** — pada serial portion yang signifikan (driver coordination, DB write, S3 I/O), maximum speedup terbatas terlepas dari jumlah worker. Distributed computing baru memberikan ROI positif pada dataset skala GB-TB dan worker dengan resource lebih besar (r5.xlarge+).
-
-### Eksperimen dengan Data Real (simulator)
-
-Benchmark menggunakan data aktual dari simulator IoT yang berjalan di production (bukan synthetic). Data di-export dari TimescaleDB → Parquet → S3, lalu dianalisis oleh Spark.
-
-**Dataset:** 5.388 records, 3 device, window 1 jam (data terbaru hasil ingestion real-time)
-
-| Skenario        | Workers | Samples | Min      | Avg       | Max       |
-|-----------------|---------|---------|----------|-----------|-----------|
-| Local mode      | 0       | 3       | 13.65 s  | 13.90 s   | 14.10 s   |
-| 1 worker        | 1       | 1       | 22.15 s  | 22.15 s   | 22.15 s   |
-| 2 worker        | 2       | 3       | 21.09 s  | 22.99 s   | 25.11 s   |
-| 3 worker        | 3       | 4       | 22.36 s  | 25.07 s   | 27.58 s   |
-| 4 worker        | 4       | 3       | 21.92 s  | 24.32 s   | 25.74 s   |
-| 5 worker        | 5       | 2       | 21.67 s  | 22.19 s   | 22.72 s   |
-
-**Temuan:**
-
-- Local mode konsisten paling cepat (~14s) — semua compute terjadi in-process tanpa network.
-- Semua skenario distributed (1-5 worker) menunjukkan **overhead konstan ~8-11 detik** dibanding local.
-- Penambahan worker dari 1 ke 5 **tidak memberikan speedup** — waktu tetap ~22-25s.
-- Overhead tersebut berasal dari: executor launch, jar distribution, network roundtrip, JDBC connection setup.
-- Compute actual (groupBy + anomaly detection) untuk 5K records < 1 detik — terlalu kecil untuk di-paralelkan.
-
-Semua run berhasil tanpa error — menunjukkan bahwa **arsitektur distributed sudah stabil**, hanya belum memberikan performance benefit pada skala ini.
-
-### Eksperimen Sebelumnya (arsitektur lama)
-
-Pada arsitektur sebelumnya (DB primary di app node), benchmark dengan 36.057 records menunjukkan diminishing returns dengan speedup terbatas (1.06x - 1.21x). Lihat git history untuk detail.
-
-### Catatan Eksperimen
-
-- Selama proses tuning, ditemukan beberapa issue infrastructure yang berpengaruh signifikan: IMDSv2 incompatibility dengan AWS SDK lama, worker tanpa public IP tidak bisa akses S3, IAM `PassRole` permission, EBS undersized untuk Spark shuffle. Detail di `docs/runbook-spark-setup.md`.
-- Hasil 1 worker sangat konsisten (variance < 1s) menunjukkan setup stabil. Variance hanya muncul pada skenario multi-worker.
+Detailed analysis and Amdahl's Law breakdown available in the [Spark Analytics Guide](docs/spark-analytics.md).
 
 ---
 
-## Struktur Folder
+## Engineering Challenges & Lessons Learned
+
+- **Resource contention forced architectural decoupling.** Running PostgreSQL, Spark, and the FastAPI backend on a single host caused database connection drops during batch processing. This led to separating the database into dedicated private subnet nodes, eliminating resource contention entirely.
+- **Private subnets block everything, including software installation.** Database nodes in the private subnet cannot reach external package repositories. We built a package sync pipeline: the Bastion downloads all RPMs, uploads them to S3, and private nodes pull packages through the free VPC Gateway Endpoint.
+- **Distributed computing doesn't always help.** Adding Spark workers made the job slower for a 64MB dataset. The coordination overhead (JVM startup, shuffle serialization, S3 API latency) exceeded the parallel computation benefit, validating Amdahl's Law in practice.
+- **Infrastructure provisioning has hidden timing dependencies.** Terraform's `local-exec` fires before the SSM agent finishes registering on a new EC2 instance. We resolved this by polling `PingStatus = Online` before sending remote commands.
+
+---
+
+## Repository Structure
 
 ```text
 iot-bigdata-project/
-├── backend/                    # FastAPI app + MQTT consumer
-│   └── app/
-│       ├── main.py             # Entry point, startup/shutdown
-│       ├── db.py               # Connection pool ke TimescaleDB
-│       ├── models/             # Pydantic schema (validasi payload)
-│       ├── routes/             # HTTP endpoint
-│       └── mqtt/               # MQTT consumer (subscribe & proses pesan)
-├── simulator/                  # Script simulasi device IoT
-├── spark-jobs/                 # PySpark batch analytics
-│   ├── export_to_parquet.py    # Export DB Standby → Parquet → S3
-│   ├── batch_analytics.py      # Spark job: S3 → analytics → DB Primary
-│   ├── run_hourly_pipeline.sh  # Orkestrator utama pipeline jam-an
-│   ├── generate_bulk_data.py   # Generate synthetic dataset untuk benchmark
-│   ├── run_with_worker.sh      # Automasi ephemeral worker (opsional)
-│   └── data/parquet/           # Temporary Parquet (tidak di-commit)
-├── benchmarks/                 # Suite benchmark (ingestion, health, idempotency)
-│   ├── run_comparison.sh       # Script pembanding benchmark dinamis
-│   └── compare_results.py      # Visualisasi laporan perbandingan benchmark
+├── .github/workflows/          # CI/CD pipeline definitions
+│
+├── backend/                    # Real-time telemetry ingestion service
+│   ├── app/
+│   │   ├── main.py             # Application entrypoint
+│   │   ├── db.py               # Database connection management
+│   │   ├── models/             # Pydantic data validation schemas
+│   │   ├── mqtt/               # MQTT data ingestion
+│   │   └── routes/             # REST API endpoints
+│   └── requirements.txt
+│
+├── simulator/                  # Device telemetry simulator
+│   └── simulator.py
+│
+├── spark-jobs/                 # Batch analytics pipeline
+│   ├── batch_analytics.py      # Aggregation and anomaly detection
+│   ├── export_to_parquet.py    # Database to S3 export
+│   ├── run_hourly_pipeline.sh  # Pipeline orchestrator
+│   └── run_with_worker.sh      # Ephemeral worker launcher
+│
+├── benchmarks/                 # Performance testing and comparison
+│   ├── results/                # Benchmark reports
+│   └── *.py                    # Test scripts
+│
 ├── db/
-│   └── init.sql                # Schema TimescaleDB (tabel + hypertable + retention)
-├── infra/
-│   ├── docker-compose.yml      # Mosquitto + Grafana + Prometheus di applayer-1
-│   ├── .env.example
-│   ├── generate_mqtt_passwd.sh # Helper generate Mosquitto password
-│   ├── scripts/                # Provisioning scripts untuk DB nodes
-│   │   ├── provision-db-primary.sh
-│   │   └── provision-db-replica.sh
-│   ├── mosquitto/
-│   │   └── mosquitto.conf
-│   ├── prometheus/             # Konfigurasi Prometheus Server
-│   │   └── prometheus.yml
-│   ├── alloy/                  # Konfigurasi Grafana Alloy push-agent
-│   │   └── config.alloy
-│   └── systemd/                # Berkas unit systemd untuk cloud deployment
-│       ├── certbot-renew.service
-│       ├── certbot-renew.timer
-│       ├── iot-backend.service
-│       ├── iot-analytics.service
-│       └── iot-analytics.timer
-├── grafana/
-│   └── provisioning/
-│       ├── datasources/        # TimescaleDB & Prometheus datasource (env-based)
-│       ├── dashboards/         # Dashboard IoT monitoring & Server monitor
-│       └── alerting/           # Alert rules + contact points (Telegram Alerting)
-├── docs/
-│   ├── ARCH-001-refactor-infra-topology.md   # Dokumen arsitektur topologi DB terpisah
-│   ├── aws-infrastructure.md                 # Konfigurasi VPC, SG, IAM AWS
-│   ├── runbook-db-setup.md                   # Setup PostgreSQL + TimescaleDB + Replication
-│   └── runbook-spark-setup.md                # Setup Spark + benchmarking & systemd automation
-└── README.md
+│   └── init.sql                # Database schema and hypertable setup
+│
+├── grafana/provisioning/       # Grafana as-code provisioning
+│   ├── alerting/               # Alert rules and notification policies
+│   ├── dashboards/             # Dashboard definitions
+│   └── datasources/            # Data source connections
+│
+├── infra/                      # Infrastructure and deployment
+│   ├── docker-compose.yml      # Container orchestration
+│   ├── mosquitto/              # MQTT broker configuration
+│   ├── prometheus/             # Metrics collection configuration
+│   ├── alloy/                  # Monitoring agent configuration
+│   ├── systemd/                # Service and timer definitions
+│   ├── scripts/                # Bootstrap and provisioning automation
+│   └── terraform/              # Infrastructure as Code
+│       ├── compute.tf          # EC2 instances and provisioners
+│       ├── network.tf          # VPC, subnets, and routing
+│       ├── security.tf         # Security groups and rules
+│       ├── secrets.tf          # SSM Parameter Store
+│       └── environments/       # Per-environment variable files
+│
+└── docs/                       # Technical documentation
+    ├── infrastructure.md       # AWS topology and architecture
+    ├── database.md             # Replication and failover procedures
+    ├── spark-analytics.md      # Pipeline design and benchmarks
+    ├── edge-device-integration.md  # Payload schemas and MQTT specs
+    ├── retrospective.md        # Engineering failures and fixes
+    └── adr/                    # Architecture Decision Records
 ```
 
 ---
 
-## Prerequisites
+## Documentation
 
-- Docker & Docker Compose
-- Python 3.12+
-- Java 21
-- Apache Spark 3.5.8
-- AWS CLI (untuk ephemeral worker automation)
-
-> Dikembangkan di WSL Ubuntu 24.04 (lokal) dan Amazon Linux 2023 (EC2).
-
----
-
-## Cara Menjalankan (Local)
-
-**1. Clone repository**
-```bash
-git clone <repo-url>
-cd iot-bigdata-project
-```
-
-**2. Siapkan environment variable**
-```bash
-cd infra
-cp .env.example .env
-# edit .env
-```
-
-**3. Jalankan base services**
-```bash
-docker compose up -d
-```
-
-**4. Jalankan backend**
-```bash
-cd backend && source .venv/bin/activate
-uvicorn app.main:app --reload
-```
-
-**5. Jalankan simulator**
-```bash
-cd simulator && source .venv/bin/activate
-python simulator.py
-```
-
-**6. Batch pipeline**
-
-* **Menjalankan Pipeline secara Manual (Ad-hoc):**
-  ```bash
-  cd spark-jobs && source .venv/bin/activate
-
-  # Orkestrasikan ekspor dan analisis secara berurutan secara lokal
-  chmod +x run_hourly_pipeline.sh
-  ./run_hourly_pipeline.sh
-  ```
-
-* **Menjalankan Spark job dengan Ephemeral Worker (AWS CLI):**
-  ```bash
-  cd spark-jobs && source .venv/bin/activate
-  ./run_with_worker.sh s3://iot-bigdata-datalake-kagebyo/raw/<file>.parquet 2
-  ```
-
-* **Deploy Systemd Timer (Otomatis per Jam di Cloud AWS):**
-  Salin file unit systemd ke folder sistem dan aktifkan timernya:
-  ```bash
-  sudo cp infra/systemd/iot-analytics.* /etc/systemd/system/
-  sudo systemctl daemon-reload
-  sudo systemctl enable --now iot-analytics.timer
-  ```
+| Document | Description |
+|:---|:---|
+| [Infrastructure Guide](docs/infrastructure.md) | VPC topology, security groups, IAM policies, and architecture decisions |
+| [Database Runbook](docs/database.md) | TimescaleDB setup, streaming replication, and failover procedures |
+| [Spark Analytics Guide](docs/spark-analytics.md) | Batch pipeline design, ephemeral workers, and scaling benchmarks |
+| [Edge Integration Specs](docs/edge-device-integration.md) | MQTT payload schemas, validation rules, and NTP synchronization |
+| [Staging Retrospective](docs/retrospective.md) | Chronological catalog of infrastructure failures and fixes |
+| [ADR-001](docs/adr/ADR-001-decouple-database-layer.md) | Architecture Decision Record: Decouple Database Layer |
 
 ---
 
-## Status Pengerjaan
+## Project Status
 
-| Phase | Scope                                           | Status      |
-|-------|-------------------------------------------------|-------------|
-| 0     | Persiapan: skema DB, infra, konfigurasi         | ✅ Selesai  |
-| 1     | Backend FastAPI + MQTT consumer + simulator     | ✅ Selesai  |
-| 1.5   | Grafana dashboard + Telegram alerting           | ✅ Selesai  |
-| 2     | Batch pipeline lokal (Spark local mode)         | ✅ Selesai  |
-| 3     | Deploy ke EC2 + replikasi DB                    | ✅ Selesai  |
-| 4     | Integrasi S3 sebagai Data Lake                  | ✅ Selesai  |
-| 5     | Multi-node Spark (ephemeral workers)            | ✅ Selesai  |
-| 6     | Automasi ephemeral worker                       | ✅ Selesai  |
-| 7     | Evaluasi & analisis hasil scaling               | ✅ Selesai  |
-| 8     | Refactor topology: separate DB layer (ARCH-001) | ✅ Selesai  |
-| 9     | Failover simulation (manual primary failover)   | ✅ Selesai  |
-| 10    | Automasi Pipeline Jam-an & Setup Monitoring     | ✅ Selesai  |
-| 11    | Security hardening: private subnet + VPC Endpoint | ✅ Selesai  |
+> *This project is under active development. Status is updated as features are verified.*
 
-## Roadmap & Future Enhancements
-
-Meskipun sistem V1 ini sudah memungkinkan untuk diterapkan di lingkungan produksi, ada beberapa *upgrade* arsitektur dan operasional yang bisa diimplementasikan ke depannya untuk mencapai standar skala *Enterprise*:
-
-1. **Infrastructure as Code (IaC) menggunakan Terraform** (✅ **Sudah Diimplementasikan untuk Staging**)
-   - **Tujuan:** Mendeskripsikan spesifikasi seluruh jaringan dan *server* AWS (VPC, EC2, S3, Endpoint) ke dalam *file* `.tf`.
-   - **Status:** File konfigurasi siap pakai terletak di [infra/terraform/](file:///home/cheshire/iot-bigdata-project/infra/terraform/). Lihat panduan lengkapnya di [Terraform README](file:///home/cheshire/iot-bigdata-project/infra/terraform/README.md).
-   - **Keuntungan:** Memungkinkan replikasi lingkungan (*Staging* ke *Production*) dengan sekali jalan (`terraform apply`), serta menjadi *backup plan* yang sempurna (*disaster recovery*) tanpa harus menyentuh AWS Console lagi.
-
-2. **CI/CD Pipeline menggunakan GitHub Actions** (✅ **Sudah Diimplementasikan untuk Staging**)
-   - **Tujuan:** Mengotomatiskan alur *deployment* jika ada perubahan fitur di repositori.
-   - **Status:** Pipeline otomatis dikonfigurasi pada [.github/workflows/deploy-staging.yml](file:///home/cheshire/iot-bigdata-project/.github/workflows/deploy-staging.yml) untuk otomatisasi deploy ke *Staging applayer-1* setiap kali ada push ke branch `staging`.
-   - **Keuntungan:** Tidak perlu lagi *login* SSH manual ke *server* hanya untuk `git pull` dan me-*restart service*. *Pipeline* akan mengeksekusinya secara aman, konsisten, dan bebas dari *human error*.
-
-3. **Real-Time Streaming Analytics (Spark Structured Streaming)**
-   - **Tujuan:** Mengevolusi Apache Spark dari pemrosesan *Batch* (setiap 1 jam) menjadi pemrosesan *Streaming* yang membaca data langsung dari *Message Broker* (seperti integrasi MQTT ke Kafka).
-   - **Keuntungan:** Menekan latensi *anomaly detection* secara drastis, dari jeda 1 jam menjadi hitungan detik (*real-time*). Sangat krusial untuk peringatan bahaya seperti terdeteksinya kadar *HAZARDOUS VOC Level*.
+| Component | Status |
+|:---|:---|
+| Real-time MQTT ingestion and closed-loop control | ✅ Verified |
+| TimescaleDB primary-standby replication | ✅ Verified |
+| Terraform IaC and zero-touch bootstrapping | ✅ Verified |
+| PySpark batch analytics with ephemeral workers | ✅ Verified |
+| Grafana observability and Telegram alerting | ✅ Verified |
+| CI/CD pipeline (GitHub Actions) | 🔧 In Progress |
+| Production environment replication | 📋 Planned |
 
 ---
 
-## Catatan
+## Future Improvements
 
-- `.env` tidak di-commit ke git. Gunakan `.env.example` sebagai acuan.
-- `grafana/provisioning/alerting/contact-points.yaml` di-commit secara aman ke git karena kredensialnya dibaca dinamis dari file `.env`.
-- `infra/mosquitto/passwd` tidak di-commit (berisi hashed password). Generate ulang via `mosquitto_passwd`.
-- `db/init.sql` di datalayer-1 dijalankan sekali via provisioning script. Lihat `docs/runbook-db-setup.md`.
-- `spark-jobs/data/` tidak di-commit ke git.
-- Spark job dari applayer-1 selalu write ke DB Primary (datalayer-1), standby PostgreSQL bersifat read-only.
-- S3 access menggunakan IAM Role, tidak ada credentials yang disimpan di kode. Spark Worker di private subnet mengakses S3 melalui VPC Gateway Endpoint (gratis).
-- Worker node bersifat ephemeral — di-launch otomatis di private subnet saat job, di-terminate setelah selesai. (Opsional untuk scaling data masif di masa depan. Default saat ini menggunakan mode `local[*]` jam-an di applayer-1).
-- Custom AMI worker (Amazon Linux 2023 + Java 21 + Spark 3.5.8).
-- Database nodes berada di private subnet (`10.0.2.0/24`) tanpa akses internet. Akses SSH melalui applayer-1 sebagai Bastion Host.
-- Detail dokumentasi setup di `docs/runbook-db-setup.md` dan `docs/runbook-spark-setup.md`.
-- Detail konfigurasi infrastruktur AWS (VPC, SG, IAM, VPC Endpoint) di `docs/aws-infrastructure.md`.
+> *This is a living list. Items are added as the project evolves.*
+
+*To be determined based on project needs and priorities.*
+
+---
+
+## Getting Started
+
+This project involves multiple infrastructure layers (networking, database provisioning, TLS certificates, DNS configuration). There is no single "quick start" command.
+
+Refer to the documentation guides for setup instructions:
+
+| Goal | Guide |
+|:---|:---|
+| Understand the AWS topology and deploy infrastructure | [Infrastructure Guide](docs/infrastructure.md) |
+| Set up TimescaleDB, replication, and failover | [Database Runbook](docs/database.md) |
+| Run the Spark analytics pipeline | [Spark Analytics Guide](docs/spark-analytics.md) |
+| Connect edge devices or run the simulator | [Edge Integration Specs](docs/edge-device-integration.md) |
