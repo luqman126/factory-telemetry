@@ -112,7 +112,7 @@ WORKER_IPS=()
 if ! pgrep -f "org.apache.spark.deploy.master.Master" > /dev/null; then
     echo "Spark Master is not running. Starting Master dynamically..."
     SPARK_LOCAL_IP=$(hostname -I | awk '{print $1}')
-    $SPARK_HOME/sbin/start-master.sh --host "$SPARK_LOCAL_IP"
+    SPARK_DAEMON_MEMORY=256m $SPARK_HOME/sbin/start-master.sh --host "$SPARK_LOCAL_IP"
     STARTED_MASTER="true"
     # Give the Master a few seconds to initialize
     sleep 3
@@ -179,7 +179,7 @@ for WORKER_IP in "${WORKER_IPS[@]}"; do
         -o UserKnownHostsFile=/dev/null \
         -o ConnectTimeout=30 \
         ec2-user@"$WORKER_IP" \
-        "SPARK_LOCAL_IP=$WORKER_IP $SPARK_HOME/sbin/start-worker.sh $SPARK_MASTER"
+        "SPARK_DAEMON_MEMORY=256m SPARK_LOCAL_IP=$WORKER_IP $SPARK_HOME/sbin/start-worker.sh $SPARK_MASTER"
     echo "  Worker $WORKER_IP started"
 done
 

@@ -31,6 +31,11 @@ This document captures the key engineering failures, debugging processes, and au
 - **Cause:** Tailscale Auth Keys expire periodically unless explicitly created as non-expiring. They also inherit broad permissions from the user who generated them.
 - **Solution:** Migrated the connection step in `.github/workflows/deploy-staging.yml` to use secure, non-expiring OAuth Client credentials (`TAILSCALE_CLIENT_ID` and `TAILSCALE_CLIENT_SECRET`) scoped strictly to ACL tag `tag:ci`.
 
+### Issue: Host Resource Exhaustion via Default Spark Daemon Memory Allocations
+- **Symptom:** Rerunning the analytics job in distributed standalone mode hung indefinitely at the `Repartitioned to 4 partitions` step.
+- **Cause:** By default, the Spark Master and Spark Worker daemon JVM processes each allocate 1GB (1024MB) of memory at startup. When running on `t3.small` nodes (2GB total RAM), starting these daemons alongside the OS, backend services, and driver/executor JVMs exceeded the physical memory limits, causing severe host-level page swapping and process freezes.
+- **Solution:** Injected `SPARK_DAEMON_MEMORY=256m` prefix variables to both the master startup and worker startup commands inside `run_with_worker.sh` to limit daemon memory consumption to 256MB. This keeps overall memory consumption well below the 2GB limit, stabilizing host operation without changing strict security groups.
+
 ### Issue: S3 /dev/null Special Device Copying Failure
 - **Symptom:** The database nodes remained stuck in the `Waiting for package sync to complete in S3...` polling loop.
 - **Cause:** The sync script used `aws s3 cp /dev/null s3://.../sync_complete.flag` to signal completion. However, AWS CLI skips `/dev/null` because it is a character special device, preventing the flag file from being uploaded.
