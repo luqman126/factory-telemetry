@@ -43,9 +43,10 @@ async def ingest_sensor(payload: SensorPayload):
 @router.get("/latest/{device_id}")
 async def get_latest(device_id: str):
     from app.db import POOL
+    from psycopg2.extras import RealDictCursor
     conn = POOL.getconn()
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
                 SELECT * FROM sensor_readings

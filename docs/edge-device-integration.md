@@ -103,7 +103,7 @@ Firmware configurations must target the appropriate broker host depending on the
 
 - **Authentication:** Username/Password credentials are provisioned per device.
 - **Authorization (ACLs):**
-  - Publish allowed to: `iot/telemetry/+`
+  - Publish allowed to: `iot/sensor/<device_id>/+`
   - Subscribe allowed to: `iot/commands/<device_id>/+`
 
 ### TLS Implementation Details
