@@ -21,6 +21,16 @@ This document captures the key engineering failures, debugging processes, and au
 - **Cause:** Rebuilding the `applayer-1` instance generated a new Tailscale interface IP (`<tailscale-new-ip>`), while the Cloudflare DNS record for `<staging-mqtt-domain>` was still pointing to the cached IP of the destroyed instance (`<tailscale-old-ip>`).
 - **Solution:** Updated the Cloudflare DNS record to map to the new Tailscale IP, restoring internal VPN routing.
 
+### Issue: Ephemeral Worker Launch Failure (ec2:CreateTags Policy Gap)
+- **Symptom:** Launching the Spark ephemeral worker via `run_with_worker.sh` crashed with an `UnauthorizedOperation` error stating `is not authorized to perform: ec2:CreateTags on resource: arn:aws:ec2:ap-southeast-1:...:instance/*`.
+- **Cause:** The script launches worker instances with `--tag-specifications` to set the worker's Name tag during creation. In AWS, assigning tags during instance creation requires the `ec2:CreateTags` permission. Our strict IAM role policy `least_privilege` was missing this action.
+- **Solution:** Added `"ec2:CreateTags"` to the `least_privilege` policy list in `infra/terraform/compute.tf` and ran `terraform apply`.
+
+### Issue: Expiring Tailscale CI/CD Auth Keys
+- **Symptom:** The GitHub Actions pipeline used temporary/expiring Tailscale Auth Keys, leading to potential silent CI/CD breakage.
+- **Cause:** Tailscale Auth Keys expire periodically unless explicitly created as non-expiring. They also inherit broad permissions from the user who generated them.
+- **Solution:** Migrated the connection step in `.github/workflows/deploy-staging.yml` to use secure, non-expiring OAuth Client credentials (`TAILSCALE_CLIENT_ID` and `TAILSCALE_CLIENT_SECRET`) scoped strictly to ACL tag `tag:ci`.
+
 ### Issue: S3 /dev/null Special Device Copying Failure
 - **Symptom:** The database nodes remained stuck in the `Waiting for package sync to complete in S3...` polling loop.
 - **Cause:** The sync script used `aws s3 cp /dev/null s3://.../sync_complete.flag` to signal completion. However, AWS CLI skips `/dev/null` because it is a character special device, preventing the flag file from being uploaded.
@@ -45,6 +55,18 @@ This document captures the key engineering failures, debugging processes, and au
 - **Cause:** TimescaleDB RPMs assume PostgreSQL installation paths used by PGDG repos (`/usr/pgsql-16/`), while Amazon Linux 2023 installs PostgreSQL under standard system library paths (`/usr/lib64/pgsql/`).
 - **Solution:** Configured automated symbolic links to map TimescaleDB `.so` library files and extension `.control` files into AL2023 system paths during database setup.
 
+### Issue: Overly Loose Mosquitto Broker ACLs
+- **Symptom:** Every connecting IoT device was granted global wildcard permissions (`topic readwrite #`), allowing any client to intercept or forge other devices' telemetry and actuator commands.
+- **Cause:** The default `mosquitto/acl` configuration mapped all users to the global `#` wildcard.
+- **Solution:** Hardened the ACL file (`infra/mosquitto/acl`) to grant read/write access to the database consumer user (`kagebyo`) on `iot/#`, while dynamically restricting individual devices to their own client paths using Mosquitto's `%u` (username) wildcard:
+  - `pattern write iot/sensor/%u/+`
+  - `pattern read iot/commands/%u/+`
+
+### Issue: Unstructured Data Returned by /latest Endpoint
+- **Symptom:** The `/sensors/latest/{device_id}` HTTP endpoint returned a list of raw database tuples without column headers, making the API brittle and unusable for external consumers.
+- **Cause:** The query executed on the database connection pool used the default cursor which returns raw rows as python lists/tuples.
+- **Solution:** Refactored the endpoint in `backend/app/routes/sensor.py` to import `RealDictCursor` from `psycopg2.extras` and passed it as the `cursor_factory` parameter. The endpoint now returns clean, structured key-value maps.
+
 ---
 
 ## 3. Spark & Java Environment Issues
@@ -62,3 +84,15 @@ This document captures the key engineering failures, debugging processes, and au
   Environment="JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto"
   Environment="SPARK_HOME=/opt/spark"
   ```
+
+### Issue: Hardcoded Ephemeral Worker SSH Key
+- **Symptom:** Step 3 of the benchmark script (`run_with_worker.sh`) threw `Warning: Identity file /home/ec2-user/.ssh/iot-worker-key not accessible` and failed to connect.
+- **Cause:** The script contained a hardcoded mock public key in its `USER_DATA` block. When launched, the EC2 instance rejected the connection because the caller's key did not match the static mock key.
+- **Solution:** Modified `run_with_worker.sh` to implement a self-healing check. The script now dynamically verifies if `~/.ssh/iot-worker-key` exists. If missing, it automatically runs `ssh-keygen` to generate a fresh pair on-the-fly and loads the public key dynamically into `USER_DATA`.
+
+### Issue: Standalone Spark Master Service Inactive
+- **Symptom:** Rerunning the ephemeral worker script failed with `Failed to connect to master 10.1.1.54:7077` and standalone workers failed to register.
+- **Cause:** The standalone Spark Master daemon was not started on `applayer-1` after staging environment reboots, preventing coordinator connections.
+- **Solution:** Added automated, self-healing initialization checking to `run_with_worker.sh`. The script now checks for the Master JVM process on launch, starts it dynamically if inactive, and automatically shuts it down during the `cleanup()` exit trap to free up compute resources when the job completes.
+
+

@@ -21,6 +21,7 @@ set -e  # exit kalau ada command yang gagal
 # Cleanup trap — pastikan worker di-terminate walau script gagal
 # ============================================================
 INSTANCE_IDS=()
+STARTED_MASTER="false"
 
 cleanup() {
     if [ ${#INSTANCE_IDS[@]} -gt 0 ]; then
@@ -31,6 +32,11 @@ cleanup() {
             --instance-ids "${INSTANCE_IDS[@]}" \
             --query 'TerminatingInstances[*].{ID:InstanceId,State:CurrentState.Name}' \
             --output table
+    fi
+    if [ "$STARTED_MASTER" = "true" ]; then
+        echo ""
+        echo "[CLEANUP] Stopping Spark Master..."
+        $SPARK_HOME/sbin/stop-master.sh
     fi
 }
 trap cleanup EXIT
@@ -99,6 +105,20 @@ EOF
 
 # Array untuk simpan IPs
 WORKER_IPS=()
+
+# ============================================================
+# Ensure Spark Master is running
+# ============================================================
+if ! pgrep -f "org.apache.spark.deploy.master.Master" > /dev/null; then
+    echo "Spark Master is not running. Starting Master dynamically..."
+    SPARK_LOCAL_IP=$(hostname -I | awk '{print $1}')
+    $SPARK_HOME/sbin/start-master.sh --host "$SPARK_LOCAL_IP"
+    STARTED_MASTER="true"
+    # Give the Master a few seconds to initialize
+    sleep 3
+else
+    echo "Spark Master is already running."
+fi
 
 # ============================================================
 # Step 1 — Launch semua EC2 worker
