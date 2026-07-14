@@ -78,9 +78,21 @@ echo "============================================"
 # ============================================================
 # User data — inject public key Node 2 ke worker saat launch
 # ============================================================
-USER_DATA=$(cat <<'EOF'
+PUB_KEY_PATH="$HOME/.ssh/iot-worker-key.pub"
+PRIV_KEY_PATH="$HOME/.ssh/iot-worker-key"
+
+if [ ! -f "$PRIV_KEY_PATH" ]; then
+    echo "Worker SSH key pair not found. Generating dynamically..."
+    mkdir -p "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh"
+    ssh-keygen -t ed25519 -f "$PRIV_KEY_PATH" -N "" -C "applayer-1-spark"
+    chmod 600 "$PRIV_KEY_PATH"
+fi
+PUB_KEY=$(cat "$PUB_KEY_PATH")
+
+USER_DATA=$(cat <<EOF
 #!/bin/bash
-echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICR+quASFWze7lxSJHLhJrNVy54tHnMD1Yo3a60hty4Z applayer-1-spark" >> /home/ec2-user/.ssh/authorized_keys
+echo "$PUB_KEY" >> /home/ec2-user/.ssh/authorized_keys
 chmod 600 /home/ec2-user/.ssh/authorized_keys
 EOF
 )

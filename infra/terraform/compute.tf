@@ -49,7 +49,8 @@ resource "aws_iam_role_policy" "least_privilege" {
         Action = [
           "ec2:RunInstances",
           "ec2:TerminateInstances",
-          "ec2:DescribeInstances"
+          "ec2:DescribeInstances",
+          "ec2:CreateTags"
         ]
         Resource = "*"
       },
