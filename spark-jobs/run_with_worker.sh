@@ -204,6 +204,7 @@ spark-submit \
     --conf spark.driver.bindAddress="$DRIVER_IP" \
     --conf spark.dynamicAllocation.enabled=false \
     --conf spark.executor.extraJavaOptions="-XX:+UseG1GC" \
+    --conf spark.local.dir="/opt/spark/work" \
     --executor-memory 768m \
     --driver-memory 512m \
     --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261,org.postgresql:postgresql:42.7.4 \
