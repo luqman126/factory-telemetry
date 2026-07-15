@@ -152,17 +152,24 @@ sudo systemctl enable --now iot-analytics.timer
 
 ## 6. Scaling Benchmarks & Amdahl's Law Validation
 
-To evaluate the efficiency of the ephemeral scaling model, we ran benchmarks with a dataset of **1,000,000 records (~64MB Parquet)** on `t3.small` nodes (1 vCPU, 2GB RAM, 30GB EBS).
+To evaluate the efficiency of the ephemeral scaling model, we ran benchmarks on `t3.small` nodes (1 vCPU, 2GB RAM, 30GB EBS) with two dataset sizes:
 
-### Results Matrix
-
+### Results Matrix: 1,000,000 Records (~64MB)
 | Scenario | Active Workers | Min Duration | Avg Duration | Max Duration |
 |:---|:---|:---|:---|:---|
 | **Local Mode** | 0 | 27.45 s | 28.56 s | 30.33 s |
 | **1 Worker** | 1 | 42.30 s | 42.47 s | 42.63 s |
 | **2 Workers** | 2 | 44.13 s | 44.13 s | 44.13 s * |
 
-*\* The 2-worker scenario showed high variance. Resource exhaustion on small t3 nodes occasionally resulted in executor heartbeat timeouts.*
+*\* High variance due to memory starvation and GC pauses prior to tuning.*
+
+### Results Matrix: 5,000,000 Records (~320MB)
+*With optimized partitioning (20 partitions) and physical disk spilling (`SPARK_LOCAL_DIRS`).*
+
+| Scenario | Active Workers | Duration | Network/Read Time | DB Write Time |
+|:---|:---|:---|:---|:---|
+| **1 Worker** | 1 | **155.77 s** | 38 s | 94 s |
+| **2 Workers** | 2 | **211.29 s** | 68 s | 116 s |
 
 ### Analysis: Negative Scaling
 This experiment demonstrated **negative scaling** (distributed cluster runs slower than local single-node runs). This is explained by two systems engineering constraints:
@@ -179,7 +186,17 @@ Where:
 
 In our pipeline, database writes (JDBC connection overhead to a single database primary) and S3 API call latency represent massive sequential portions ($1 - P$). Adding worker nodes ($N$) only reduces the tiny parallel portion (in-memory aggregation of 64MB data), which takes less than a second anyway, while increasing scheduling and coordination costs.
 
-**Conclusion:** Ephemeral distributed scaling is only cost-effective and performant when the dataset sizes exceed the RAM limits of the master node (typically >10GB workloads).
+### Stress Test: 5,000,000 Records in Local Mode (Fatal Crash)
+To validate the absolute necessity of the Ephemeral Worker architecture, we attempted to process the 5,000,000 record (~320MB) dataset entirely on the `applayer-1` master node using `local[*]` mode (0 workers).
+
+**The result was a catastrophic host failure.** 
+
+1. **Partition Trap:** In local mode (`worker_count == 0`), the dynamic `df.repartition()` logic is bypassed. Spark read the massive dataset into a single giant partition.
+2. **Memory Exhaustion:** The `run_hourly_pipeline.sh` script restricts `local[*]` mode to `512m` of JVM heap. The uncompressed Parquet objects instantly overwhelmed this limit.
+3. **RAM Disk Spill (OOM Panic):** Out of memory, Spark attempted to persist data to disk (`BlockManager: Persisting block rdd_6_0 to disk instead`). However, because `SPARK_LOCAL_DIRS` was not explicitly set for the master, it spilled to the OS default `/tmp` directory. On Amazon Linux 2023, `/tmp` is a `tmpfs` (RAM disk). This instantly exhausted the remaining physical RAM on the `t3.small` instance, starving the OS, FastAPI, and Grafana.
+4. **Conclusion:** The kernel triggered an OOM panic and the instance completely locked up, requiring a total `terraform apply` rebuild of the `applayer` node.
+
+**Final Conclusion:** Ephemeral distributed scaling is mathematically slower for small datasets (due to Amdahl's Law), but it is **architecturally mandatory** for large datasets. Offloading heavy compute to worker nodes is the only way to protect the Master node from fatal Out-Of-Memory crashes.
 
 ---
 

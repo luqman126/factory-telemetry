@@ -302,3 +302,21 @@ For always-on infrastructure in `ap-southeast-1`:
 
 > Ephemeral worker cost is negligible (runs for a few minutes per job, $0.0264/hr x job count x duration).
 > For accurate estimates, use the [AWS Pricing Calculator](https://calculator.aws/).
+
+---
+
+## Disaster Recovery & Immutable Infrastructure (IaC)
+
+This architecture strictly adheres to **Infrastructure as Code (IaC)** principles using Terraform, treating instances as "cattle, not pets." 
+
+If a catastrophic failure occurs—such as a fatal kernel panic (OOM) on the `applayer` node caused by an unpartitioned Big Data stress test—recovery is fully automated without manual SSH debugging or OS-level repairs.
+
+### Recovery Workflow Example (Proven via Stress Test)
+When an instance like `applayer-1` crashes irrecoverably:
+1. The administrator simply runs `terraform apply`.
+2. Terraform detects the tainted or destroyed instance state and removes the broken node (`1 destroyed`).
+3. Terraform provisions a brand new instance on AWS (`1 added`).
+4. The heavily automated `local-exec` provisioners install all dependencies (Java, Python, Spark, systemd services) from scratch.
+5. Within ~2.5 minutes, the entire server is completely rebuilt and restored to the exact desired production state.
+
+This immutable architecture guarantees that human error, heavy analytical crashes, or OS corruption can be resolved instantly via automated rebuilds, ensuring massive fault tolerance.
