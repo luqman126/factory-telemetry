@@ -145,9 +145,9 @@ def run(parquet_path: str, worker_count: int = 0):
     # --------------------------------------------------------
     df = spark.read.parquet(parquet_path)
 
-    # Smart repartition sebelum cache
+    # Smart repartition sebelum cache (banyak partisi = data per partisi kecil, mencegah OOM)
     if worker_count > 0:
-        num_partitions = max(worker_count * 2, 4)
+        num_partitions = max(worker_count * 10, 20)
         df = df.repartition(num_partitions)
         logger.info(f"Repartitioned to {num_partitions} partitions")
 
