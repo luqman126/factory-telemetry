@@ -184,15 +184,25 @@ Infrastructure is provisioned entirely through Terraform. On `terraform apply`, 
 
 > *This section is updated as new benchmarks are conducted.*
 
-Benchmarks were executed on AWS `t3.small` nodes (1 vCPU, 2GB RAM) with 1,000,000 synthetic records (~64MB Parquet).
+Benchmarked on AWS `t3.small` nodes (1 vCPU, 2GB RAM) running Apache Spark 3.5.
 
+### 1,000,000 Records (~64MB Parquet)
 | Scenario | Workers | Avg Duration |
 |:---|:---|:---|
 | Local Mode | 0 | **28.56 s** |
 | 1 Distributed Worker | 1 | **42.47 s** |
 | 2 Distributed Workers | 2 | **44.13 s** |
 
-**Finding: Negative Scaling.** For datasets smaller than single-node RAM capacity, distributed coordination overhead (JVM startup, network shuffles, S3 API latency) exceeds the parallel computation benefit. Ephemeral scaling becomes cost-effective only when dataset sizes exceed the memory limits of the master node.
+**Finding: Negative Scaling.** For datasets smaller than single-node RAM capacity, distributed coordination overhead (JVM startup, network shuffles, database connection contention) exceeds the parallel computation benefit.
+
+### 5,000,000 Records (~320MB Parquet)
+| Scenario | Workers | Result |
+|:---|:---|:---|
+| Local Mode (Master Only) | 0 | **Fatal Crash (OOM)** |
+| 1 Distributed Worker | 1 | **155.77 s** |
+| 2 Distributed Workers | 2 | **211.29 s** |
+
+**Finding: The Architectural Necessity of Distribution.** When processing the massive 5M dataset, `Local Mode` instantly exhausted the master node's 512MB heap limit, causing a fatal OS kernel panic due to a `tmpfs` RAM disk spill. Offloading the compute to dedicated Ephemeral Workers protected the master node and successfully completed the analytics. 1 Worker remained faster than 2 Workers due to database lock contention.
 
 Detailed analysis and Amdahl's Law breakdown available in the [Spark Analytics Guide](docs/spark-analytics.md).
 
@@ -202,7 +212,7 @@ Detailed analysis and Amdahl's Law breakdown available in the [Spark Analytics G
 
 - **Resource contention forced architectural decoupling.** Running PostgreSQL, Spark, and the FastAPI backend on a single host caused database connection drops during batch processing. This led to separating the database into dedicated private subnet nodes, eliminating resource contention entirely.
 - **Private subnets block everything, including software installation.** Database nodes in the private subnet cannot reach external package repositories. We built a package sync pipeline: the Bastion downloads all RPMs, uploads them to S3, and private nodes pull packages through the free VPC Gateway Endpoint.
-- **Distributed computing doesn't always help.** Adding Spark workers made the job slower for a 64MB dataset. The coordination overhead (JVM startup, shuffle serialization, S3 API latency) exceeded the parallel computation benefit, validating Amdahl's Law in practice.
+- **Distributed computing isn't a silver bullet, but it's an architectural necessity.** Adding Spark workers made the job slower for a 64MB dataset due to coordination overhead (JVM startup, network shuffles, S3 API latency), validating Amdahl's Law in practice. However, for a 320MB dataset, running in Local Mode caused a fatal OS-level kernel panic due to a `/tmp` RAM disk spill. Ephemeral distribution became mandatory to protect the master node from catastrophic Out-Of-Memory crashes.
 - **Infrastructure provisioning has hidden timing dependencies.** Terraform's `local-exec` fires before the SSM agent finishes registering on a new EC2 instance. We resolved this by polling `PingStatus = Online` before sending remote commands.
 
 ---

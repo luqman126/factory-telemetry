@@ -41,6 +41,10 @@ This document captures the key engineering failures, debugging processes, and au
 - **Cause:** While the worker security group allowed outbound TCP traffic and SSH (port 22) ingress, it blocked inbound traffic on all other ports. During a shuffle (like `repartition`), the Driver must connect to the executor's BlockManager on the worker node, and executors on different workers must connect to each other to transfer data blocks.
 - **Solution:** Updated `security.tf` to add ingress rules allowing all TCP ports (`0-65535`) from the `applayer` security group and from the `worker` security group itself (self-ingress), allowing unimpeded cluster orchestration and shuffle exchanges.
 
+### Issue: Spark Executor RAM Disk Spill & OOM (No space left on device)
+- **Symptom:** Rerunning the analytics job with a massive dataset (5,000,000 records) failed with `Unable to create executor due to No space left on device` and `Not enough space to cache rdd_... in memory!`.
+- **Cause:** Two interlocked issues caused this. First, the data was repartitioned into too few partitions (e.g., 4 partitions for 5M records), causing each massive chunk to instantly exceed the small 768MB executor heap, leading to a Garbage Collection freeze (OOM) and executor death loops. Second, when Spark attempted to spill the excess memory to disk or download external jars (like the 280MB AWS SDK), it wrote to the OS default `/tmp` directory. On Amazon Linux, `/tmp` is a `tmpfs` (RAM Disk) restricted to half of system memory (1GB), which instantly filled up.
+- **Solution:** Modified `batch_analytics.py` to dynamically scale the partition count (`max(worker_count * 10, 20)`) to ensure bite-sized chunks that fit in the JVM heap. Additionally, injected `SPARK_LOCAL_DIRS=/opt/spark/work` into the worker daemon startup sequence in `run_with_worker.sh`, forcing the Standalone cluster manager to route all executor disk spills and Ivy package downloads to the 30GB physical EBS volume instead of the RAM Disk.
 
 ### Issue: S3 /dev/null Special Device Copying Failure
 - **Symptom:** The database nodes remained stuck in the `Waiting for package sync to complete in S3...` polling loop.
