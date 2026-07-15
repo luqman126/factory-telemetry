@@ -144,10 +144,20 @@ resource "aws_security_group_rule" "datalayer_self_postgres" {
 # ---- Rules untuk Worker SG ----
 resource "aws_security_group_rule" "worker_from_applayer" {
   type                     = "ingress"
-  description              = "SSH dari applayer"
-  from_port                = 22
-  to_port                  = 22
+  description              = "Allow Spark control and block transfer from applayer"
+  from_port                = 0
+  to_port                  = 65535
   protocol                 = "tcp"
   security_group_id        = aws_security_group.worker.id
   source_security_group_id = aws_security_group.applayer.id
+}
+
+resource "aws_security_group_rule" "worker_self" {
+  type                     = "ingress"
+  description              = "Allow block transfer and shuffle between workers"
+  from_port                = 0
+  to_port                  = 65535
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.worker.id
+  source_security_group_id = aws_security_group.worker.id
 }

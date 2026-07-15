@@ -34,7 +34,13 @@ This document captures the key engineering failures, debugging processes, and au
 ### Issue: Host Resource Exhaustion via Default Spark Daemon Memory Allocations
 - **Symptom:** Rerunning the analytics job in distributed standalone mode hung indefinitely at the `Repartitioned to 4 partitions` step.
 - **Cause:** By default, the Spark Master and Spark Worker daemon JVM processes each allocate 1GB (1024MB) of memory at startup. When running on `t3.small` nodes (2GB total RAM), starting these daemons alongside the OS, backend services, and driver/executor JVMs exceeded the physical memory limits, causing severe host-level page swapping and process freezes.
-- **Solution:** Injected `SPARK_DAEMON_MEMORY=256m` prefix variables to both the master startup and worker startup commands inside `run_with_worker.sh` to limit daemon memory consumption to 256MB. This keeps overall memory consumption well below the 2GB limit, stabilizing host operation without changing strict security groups.
+- **Solution:** Injected `SPARK_DAEMON_MEMORY=256m` prefix variables to both the master startup and worker startup commands inside `run_with_worker.sh` to limit daemon memory consumption to 256MB. This keeps overall memory consumption well below the 2GB limit, stabilizing host operation.
+
+### Issue: Spark Shuffle Block Transfer Port Block (Intermittent Hang at Repartitioning)
+- **Symptom:** PySpark analytics jobs running in distributed standalone mode with workers hung for 9 to 14 minutes at the `Repartitioned to 4 partitions` step, generating `RetryingBlockTransferor: Exception while beginning fetch of 1 outstanding blocks` in the executor logs.
+- **Cause:** While the worker security group allowed outbound TCP traffic and SSH (port 22) ingress, it blocked inbound traffic on all other ports. During a shuffle (like `repartition`), the Driver must connect to the executor's BlockManager on the worker node, and executors on different workers must connect to each other to transfer data blocks.
+- **Solution:** Updated `security.tf` to add ingress rules allowing all TCP ports (`0-65535`) from the `applayer` security group and from the `worker` security group itself (self-ingress), allowing unimpeded cluster orchestration and shuffle exchanges.
+
 
 ### Issue: S3 /dev/null Special Device Copying Failure
 - **Symptom:** The database nodes remained stuck in the `Waiting for package sync to complete in S3...` polling loop.
