@@ -309,9 +309,15 @@ iot-bigdata-project/
 
 ## Future Improvements
 
-> *This is a living list. Items are added as the project evolves.*
+While the current architecture successfully proves the End-to-End flow of IoT telemetry, the following evolution paths are identified for true enterprise scalability:
 
-*To be determined based on project needs and priorities.*
+### 1. Architectural Evolution (Highest ROI)
+- **Managed Orchestration (Kubernetes / EKS):** Migrate the DIY Spark bash scripts (`run_with_worker.sh`) to Kubernetes. Using K8s or Amazon EMR will natively handle cluster auto-scaling, pod scheduling, and worker health checks without raw bash orchestration.
+- **Managed Services (DBaaS & IoT Core):** Shift from a self-managed Mosquitto EC2 instance to AWS IoT Core for infinite MQTT scaling. Migrate the self-managed TimescaleDB to Amazon RDS to offload manual replication, backups, and OS patching.
+
+### 2. Technical Evolution
+- **Real-Time Streaming Analytics:** Shift from the current hourly PySpark batch processing to Spark Structured Streaming (or Apache Flink) to detect sensor anomalies within milliseconds of ingestion.
+- **Infrastructure CI/CD Automation:** Integrate `terraform plan` and `terraform apply` directly into GitHub Actions via Atlantis or Terraform Cloud to fully automate infrastructure mutation tracking.
 
 ---
 
