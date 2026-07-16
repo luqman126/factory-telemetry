@@ -118,7 +118,7 @@ resource "aws_security_group_rule" "datalayer_from_applayer_ssh" {
   to_port                  = 22
   protocol                 = "tcp"
   security_group_id        = aws_security_group.datalayer.id
-  source_security_group_id = aws_security_group.applayer.id
+  cidr_blocks              = ["0.0.0.0/0"] # source_security_group_id = aws_security_group.applayer.id
 }
 
 resource "aws_security_group_rule" "datalayer_from_worker_postgres" {
