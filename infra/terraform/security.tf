@@ -118,7 +118,7 @@ resource "aws_security_group_rule" "datalayer_from_applayer_ssh" {
   to_port                  = 22
   protocol                 = "tcp"
   security_group_id        = aws_security_group.datalayer.id
-  cidr_blocks              = ["0.0.0.0/0"] # source_security_group_id = aws_security_group.applayer.id
+  source_security_group_id = aws_security_group.applayer.id
 }
 
 resource "aws_security_group_rule" "datalayer_from_worker_postgres" {
@@ -128,7 +128,7 @@ resource "aws_security_group_rule" "datalayer_from_worker_postgres" {
   to_port                  = 5432
   protocol                 = "tcp"
   security_group_id        = aws_security_group.datalayer.id
-  cidr_blocks              = ["0.0.0.0/0"] # source_security_group_id = aws_security_group.worker.id
+  source_security_group_id = aws_security_group.worker.id
 }
 
 resource "aws_security_group_rule" "datalayer_self_postgres" {
@@ -149,7 +149,7 @@ resource "aws_security_group_rule" "worker_from_applayer" {
   to_port                  = 65535
   protocol                 = "tcp"
   security_group_id        = aws_security_group.worker.id
-  cidr_blocks              = ["0.0.0.0/0"] # source_security_group_id = aws_security_group.applayer.id
+  source_security_group_id = aws_security_group.applayer.id
 }
 
 resource "aws_security_group_rule" "worker_self" {
