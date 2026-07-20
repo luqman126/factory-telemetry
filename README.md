@@ -14,11 +14,20 @@ An end-to-end IoT telemetry ingestion, processing, and closed-loop control syste
 
 ---
 
+## Versions
+
+| Version | Tag | Summary |
+|:---|:---|:---|
+| v1.0 | [`v1.0-college-project`](docs/versions/v1.0.md) | College deadline release — core pipeline, manual provisioning |
+| v2.0 | [`v2.0`](docs/versions/v2.0.md) | Terraform IaC, CI/CD, closed-loop control, provisioning automation |
+
+---
+
 ## Project Overview
 
 This project builds a full-stack IoT monitoring pipeline for a simulated manufacturing facility. Sensors across three factory zones continuously stream temperature, vibration, and gas readings to a cloud backend over MQTT. The backend validates, stores, and analyzes the data in real time, and when a dangerous condition is detected (e.g., overheating), it publishes a control command back to the device within milliseconds.
 
-The raw telemetry is stored in a TimescaleDB time-series database with automatic partitioning. For long-term retention and heavy analytical workloads, data is exported hourly to Amazon S3 as compressed Parquet files and processed by Apache Spark batch jobs running on ephemeral workers.
+The raw telemetry is stored in a TimescaleDB time-series database with automatic partitioning. For long-term retention and heavy analytical workloads, data is exported hourly to Amazon S3 as compressed Parquet files and processed by Apache Spark batch jobs running in local mode on the application host.
 
 The entire infrastructure (networking, compute, security, secrets) is defined as Terraform code and can be deployed from scratch with a single command.
 
@@ -48,7 +57,7 @@ This project deliberately uses self-hosted open-source components instead of man
 | Our Decision | Production Alternative | What We Demonstrate |
 |:---|:---|:---|
 | PostgreSQL + TimescaleDB on EC2 | Amazon RDS / Aurora | Streaming replication configuration, WAL management, manual failover procedures |
-| Spark on EC2 with bash orchestration | AWS EMR / Glue | Ephemeral worker lifecycle, coordination overhead analysis, Amdahl's Law benchmarking |
+| Spark on EC2 (local mode + experimental distributed workers) | AWS EMR / Glue | Ephemeral worker lifecycle benchmarking, coordination overhead analysis, Amdahl's Law validation |
 | Docker Compose on a single host | ECS / EKS (Kubernetes) | Container networking, volume persistence, service dependency management |
 | Self-hosted Mosquitto | AWS IoT Core / HiveMQ Cloud | TLS certificate provisioning, ACL enforcement, pub/sub topic architecture |
 
@@ -102,13 +111,12 @@ graph TD
     subgraph pub["🟢 Public Subnet (10.x.1.0/24)"]
         A[FastAPI + MQTT Consumer]
         B[Mosquitto Broker]
-        C[Spark Master]
+        C[Spark Local Mode]
         D[Prometheus + Grafana]
     end
 
     subgraph priv["🔵 Private Subnet (10.x.2.0/24)"]
         E[TimescaleDB Primary] <-->|Streaming Replication| F[TimescaleDB Standby]
-        G[Ephemeral Spark Workers]
     end
 
     subgraph aws["🟠 AWS Managed Services"]
@@ -119,20 +127,17 @@ graph TD
     B --> A
     A -->|Write| E
     F -->|Export Parquet| S3
-    S3 -->|Read via VPC Endpoint| G
-    G -->|Write analytics| E
+    S3 -->|Read via VPC Endpoint| C
+    C -->|Write analytics| E
     D -->|Query| E
 
     classDef public fill:#d4edda,stroke:#28a745,color:#155724
     classDef private fill:#cce5ff,stroke:#007bff,color:#004085
     classDef awsService fill:#fff3cd,stroke:#ffc107,color:#856404
     classDef edge fill:#e2d5f1,stroke:#6f42c1,color:#4a2882
-    classDef monitor fill:#fff8e1,stroke:#f9a825,color:#5d4037
 
-    class A,B,C public
-    class D monitor
+    class A,B,C,D public
     class E,F private
-    class G private
     class S3 awsService
     class Edge edge
 ```
@@ -212,7 +217,7 @@ Detailed analysis and Amdahl's Law breakdown available in the [Spark Analytics G
 
 - **Resource contention forced architectural decoupling.** Running PostgreSQL, Spark, and the FastAPI backend on a single host caused database connection drops during batch processing. This led to separating the database into dedicated private subnet nodes, eliminating resource contention entirely.
 - **Private subnets block everything, including software installation.** Database nodes in the private subnet cannot reach external package repositories. We built a package sync pipeline: the Bastion downloads all RPMs, uploads them to S3, and private nodes pull packages through the free VPC Gateway Endpoint.
-- **Distributed computing isn't a silver bullet, but it's an architectural necessity.** Adding Spark workers made the job slower for a 64MB dataset due to coordination overhead (JVM startup, network shuffles, S3 API latency), validating Amdahl's Law in practice. However, for a 320MB dataset, running in Local Mode caused a fatal OS-level kernel panic due to a `/tmp` RAM disk spill. Ephemeral distribution became mandatory to protect the master node from catastrophic Out-Of-Memory crashes.
+- **Distributed computing isn't a silver bullet, but it's an architectural necessity.** Adding Spark workers made the job slower for a 64MB dataset due to coordination overhead (JVM startup, network shuffles, S3 API latency), validating Amdahl's Law in practice. However, for a 320MB dataset, running in Local Mode caused a fatal OS-level kernel panic due to a `/tmp` RAM disk spill. Ephemeral distribution became mandatory to protect the master node from catastrophic Out-Of-Memory crashes. *Note: The daily production workflow runs in Local Mode for cost and simplicity; ephemeral distribution was validated as a scaling path for datasets exceeding single-node memory capacity.*
 - **Infrastructure provisioning has hidden timing dependencies.** Terraform's `local-exec` fires before the SSM agent finishes registering on a new EC2 instance. We resolved this by polling `PingStatus = Online` before sending remote commands.
 
 ---
@@ -300,24 +305,28 @@ iot-bigdata-project/
 | Real-time MQTT ingestion and closed-loop control | ✅ Verified |
 | TimescaleDB primary-standby replication | ✅ Verified |
 | Terraform IaC and zero-touch bootstrapping | ✅ Verified |
-| PySpark batch analytics with ephemeral workers | ✅ Verified |
+| PySpark batch analytics (Local Mode) | ✅ Verified |
 | Grafana observability and Telegram alerting | ✅ Verified |
-| CI/CD pipeline (GitHub Actions) | 🔧 In Progress |
-| Production environment replication | 📋 Planned |
+| CI/CD pipeline (GitHub Actions + Tailscale) | ✅ Verified |
 
 ---
 
 ## Future Improvements
 
-While the current architecture successfully proves the End-to-End flow of IoT telemetry, the following evolution paths are identified for true enterprise scalability:
+While the current architecture successfully proves the end-to-end flow of IoT telemetry, the following evolution paths are identified for operational maturity and deeper systems engineering practice:
 
-### 1. Architectural Evolution (Highest ROI)
-- **Managed Orchestration (Kubernetes / EKS):** Migrate the DIY Spark bash scripts (`run_with_worker.sh`) to Kubernetes. Using K8s or Amazon EMR will natively handle cluster auto-scaling, pod scheduling, and worker health checks without raw bash orchestration.
-- **Managed Services (DBaaS & IoT Core):** Shift from a self-managed Mosquitto EC2 instance to AWS IoT Core for infinite MQTT scaling. Migrate the self-managed TimescaleDB to Amazon RDS to offload manual replication, backups, and OS patching.
+### Near-Term (Planned)
+- **Configuration Management (Ansible):** Replace fragile bash provisioning scripts (`provision-db-primary.sh`, `provision-db-replica.sh`, `setup-alloy-nodes.sh`) with idempotent Ansible playbooks. Current scripts are not safe to re-run on a live system; Ansible ensures repeatable, declarative configuration for database nodes and monitoring agents.
+- **Custom AMI Pipeline (Packer):** Bake PostgreSQL, TimescaleDB, Alloy, Java, and Spark into pre-built AMIs using Packer (driven by Ansible roles). Eliminates the S3 RPM relay pipeline (`sync-packages-to-s3.sh`) and reduces provisioning time from ~15 minutes to ~2-3 minutes. Database nodes boot ready-to-configure instead of ready-to-install.
+- **Containerized Orchestration (Kubernetes):** Migrate Docker Compose services (FastAPI backend, Mosquitto, Grafana stack) to a lightweight Kubernetes cluster (k3s). Enables rolling updates, health-check-based restarts, and a foundation for auto-scaling the backend under load.
+- **Spark on Kubernetes:** Replace the bash-based ephemeral worker launcher (`run_with_worker.sh`) with Kubernetes-native Spark Operator. Spark driver/executor pods are scheduled as native K8s workloads with proper resource limits and retry policies.
 
-### 2. Technical Evolution
-- **Real-Time Streaming Analytics:** Shift from the current hourly PySpark batch processing to Spark Structured Streaming (or Apache Flink) to detect sensor anomalies within milliseconds of ingestion.
-- **Infrastructure CI/CD Automation:** Integrate `terraform plan` and `terraform apply` directly into GitHub Actions via Atlantis or Terraform Cloud to fully automate infrastructure mutation tracking.
+### Mid-Term (Under Consideration)
+- **Workflow Orchestration (Airflow):** Replace the systemd timer-driven hourly pipeline with an Apache Airflow DAG for retry logic, dependency tracking, and execution visibility.
+- **RAG-based Sensor Query Interface:** Natural-language query layer over historical sensor data using retrieval-augmented generation. Embeds daily Parquet summaries into a vector store (pgvector on existing TimescaleDB), exposed as a `/chat` endpoint on the FastAPI backend.
+
+### Long-Term (Aspirational)
+- **Real-Time Anomaly Detection:** Evolve from hourly batch analytics to sub-second anomaly detection using Spark Structured Streaming or Apache Flink, reading directly from the MQTT broker via a Kafka bridge.
 
 ---
 
