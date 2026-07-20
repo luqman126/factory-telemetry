@@ -23,6 +23,8 @@ class SensorPayload(BaseModel):
     temperature:    Optional[float] = Field(default=None, ge=-10, le=100)   # Celsius
     humidity:       Optional[float] = Field(default=None, ge=0, le=100)     # %RH
 
+    fan_status:     Optional[str] = None
+
     # Accelerometer / getaran (MPU6050 — ruang produksi utama)
     accel_x:        Optional[float] = None  # m/s²
     accel_y:        Optional[float] = None  # m/s²

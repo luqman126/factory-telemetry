@@ -23,38 +23,59 @@ PRIMARY_IP="$1"
 DB_PASSWORD="$2"
 
 echo "=== [1/6] Installing PostgreSQL 16 ==="
-dnf install -y postgresql16-server postgresql16-contrib postgresql16-private-devel
+rm -f /etc/yum.repos.d/timescaledb.repo
+if rpm -q postgresql16-server >/dev/null 2>&1; then
+    echo "PostgreSQL 16 is already installed."
+elif ls /home/ec2-user/postgresql16-*.rpm >/dev/null 2>&1; then
+    echo "Installing PostgreSQL 16 from local RPMs..."
+    dnf localinstall -y /home/ec2-user/postgresql16-*.rpm
+else
+    echo "ERROR: Local PostgreSQL 16 RPMs not found at /home/ec2-user/." >&2
+    exit 1
+fi
+
+echo "=== [1.5/6] Symlinking pg_config for TimescaleDB RPM compatibility ==="
+mkdir -p /usr/pgsql-16/bin
+ln -sf /usr/bin/pg_config /usr/pgsql-16/bin/pg_config
 
 echo "=== [2/6] Installing TimescaleDB ==="
-cat > /etc/yum.repos.d/timescaledb.repo <<'EOF'
-[timescaledb]
-name=TimescaleDB
-baseurl=https://packagecloud.io/timescale/timescaledb/el/9/$basearch
-gpgcheck=0
-enabled=1
-EOF
-dnf install -y timescaledb-2-postgresql-16
+if rpm -q timescaledb-2-postgresql-16 >/dev/null 2>&1; then
+    echo "TimescaleDB is already installed."
+elif ls /home/ec2-user/timescaledb-*.rpm >/dev/null 2>&1; then
+    echo "Installing TimescaleDB from local RPMs..."
+    dnf localinstall -y /home/ec2-user/timescaledb-*.rpm
+else
+    echo "ERROR: Local TimescaleDB RPM not found at /home/ec2-user/." >&2
+    echo "Please download the RPM on bastion and copy it here first." >&2
+    exit 1
+fi
 
 echo "=== [3/6] Fixing TimescaleDB paths (Amazon Linux 2023 compatibility) ==="
 ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.so /usr/lib64/pgsql/
-ln -sf /usr/lib64/timescaledb-pg16/timescaledb-2.27.1.so /usr/lib64/pgsql/
-ln -sf /usr/lib64/timescaledb-pg16/timescaledb-tsl-2.27.1.so /usr/lib64/pgsql/
+ln -sf /usr/lib64/timescaledb-pg16/timescaledb-*.so /usr/lib64/pgsql/
 ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.control /usr/share/pgsql/extension/
 ln -sf /usr/lib64/timescaledb-pg16/timescaledb--*.sql /usr/share/pgsql/extension/
 
 echo "=== [4/6] Base backup from primary ==="
 PGDATA="/var/lib/pgsql/data"
 
-# Remove default data dir (initdb not needed for replica)
-rm -rf "$PGDATA"
-
-# pg_basebackup from primary
-PGPASSWORD="$DB_PASSWORD" pg_basebackup \
-    -h "$PRIMARY_IP" \
-    -U replicator \
-    -D "$PGDATA" \
-    -Fp -Xs -P -R \
-    -S node3_replica_slot
+# pg_basebackup from primary with retry loop to handle startup race conditions
+echo "-> Performing base backup from primary..."
+for i in {1..30}; do
+    rm -rf "$PGDATA"
+    if PGPASSWORD="$DB_PASSWORD" pg_basebackup \
+        -h "$PRIMARY_IP" \
+        -U replicator \
+        -D "$PGDATA" \
+        -Fp -Xs -P -R \
+        -S replica_datalayer2_slot; then
+        echo "Base backup completed successfully!"
+        break
+    else
+        echo "Backup attempt $i failed (primary might not be fully ready), retrying in 10 seconds..."
+        sleep 10
+    fi
+done
 
 chown -R postgres:postgres "$PGDATA"
 chmod 700 "$PGDATA"
@@ -65,7 +86,7 @@ cat >> "$PGDATA/postgresql.conf" <<EOF
 
 # --- Replica settings ---
 hot_standby = on
-primary_slot_name = 'node3_replica_slot'
+primary_slot_name = 'replica_datalayer2_slot'
 EOF
 
 echo "=== [6/6] Starting PostgreSQL (replica mode) ==="

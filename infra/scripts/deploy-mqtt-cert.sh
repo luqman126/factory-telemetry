@@ -9,11 +9,14 @@
 #   2. Deploy-hook certbot renewal (cert auto-update tiap 90 hari)
 #
 # Usage:
-#   sudo ./deploy-mqtt-cert.sh
+#   sudo ./deploy-mqtt-cert.sh [domain_name]
+#   (defaults to mqtt.chescloud.my.id if no argument is provided)
 # ============================================================
 set -euo pipefail
 
-DOMAIN="mqtt.chescloud.my.id"
+# Gunakan parameter pertama jika ada (untuk staging/custom env),
+# fallback ke domain production default untuk backward compatibility.
+DOMAIN="${1:-mqtt.chescloud.my.id}"
 LE_DIR="/etc/letsencrypt/live/${DOMAIN}"
 # Direktori cert Mosquitto (relatif terhadap lokasi script: infra/scripts/ -> infra/mosquitto/certs)
 CERT_DIR="$(cd "$(dirname "$0")/.." && pwd)/mosquitto/certs"

@@ -21,6 +21,7 @@ set -e  # exit kalau ada command yang gagal
 # Cleanup trap — pastikan worker di-terminate walau script gagal
 # ============================================================
 INSTANCE_IDS=()
+STARTED_MASTER="false"
 
 cleanup() {
     if [ ${#INSTANCE_IDS[@]} -gt 0 ]; then
@@ -31,6 +32,11 @@ cleanup() {
             --instance-ids "${INSTANCE_IDS[@]}" \
             --query 'TerminatingInstances[*].{ID:InstanceId,State:CurrentState.Name}' \
             --output table
+    fi
+    if [ "$STARTED_MASTER" = "true" ]; then
+        echo ""
+        echo "[CLEANUP] Stopping Spark Master..."
+        $SPARK_HOME/sbin/stop-master.sh
     fi
 }
 trap cleanup EXIT
@@ -78,15 +84,41 @@ echo "============================================"
 # ============================================================
 # User data — inject public key Node 2 ke worker saat launch
 # ============================================================
-USER_DATA=$(cat <<'EOF'
+PUB_KEY_PATH="$HOME/.ssh/iot-worker-key.pub"
+PRIV_KEY_PATH="$HOME/.ssh/iot-worker-key"
+
+if [ ! -f "$PRIV_KEY_PATH" ]; then
+    echo "Worker SSH key pair not found. Generating dynamically..."
+    mkdir -p "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh"
+    ssh-keygen -t ed25519 -f "$PRIV_KEY_PATH" -N "" -C "applayer-1-spark"
+    chmod 600 "$PRIV_KEY_PATH"
+fi
+PUB_KEY=$(cat "$PUB_KEY_PATH")
+
+USER_DATA=$(cat <<EOF
 #!/bin/bash
-echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICR+quASFWze7lxSJHLhJrNVy54tHnMD1Yo3a60hty4Z applayer-1-spark" >> /home/ec2-user/.ssh/authorized_keys
+echo "$PUB_KEY" >> /home/ec2-user/.ssh/authorized_keys
 chmod 600 /home/ec2-user/.ssh/authorized_keys
 EOF
 )
 
 # Array untuk simpan IPs
 WORKER_IPS=()
+
+# ============================================================
+# Ensure Spark Master is running
+# ============================================================
+if ! pgrep -f "org.apache.spark.deploy.master.Master" > /dev/null; then
+    echo "Spark Master is not running. Starting Master dynamically..."
+    SPARK_LOCAL_IP=$(hostname -I | awk '{print $1}')
+    SPARK_DAEMON_MEMORY=256m $SPARK_HOME/sbin/start-master.sh --host "$SPARK_LOCAL_IP"
+    STARTED_MASTER="true"
+    # Give the Master a few seconds to initialize
+    sleep 3
+else
+    echo "Spark Master is already running."
+fi
 
 # ============================================================
 # Step 1 — Launch semua EC2 worker
@@ -147,7 +179,7 @@ for WORKER_IP in "${WORKER_IPS[@]}"; do
         -o UserKnownHostsFile=/dev/null \
         -o ConnectTimeout=30 \
         ec2-user@"$WORKER_IP" \
-        "SPARK_LOCAL_IP=$WORKER_IP $SPARK_HOME/sbin/start-worker.sh $SPARK_MASTER"
+        "SPARK_DAEMON_MEMORY=256m SPARK_LOCAL_DIRS=/opt/spark/work SPARK_LOCAL_IP=$WORKER_IP $SPARK_HOME/sbin/start-worker.sh $SPARK_MASTER"
     echo "  Worker $WORKER_IP started"
 done
 
@@ -171,7 +203,9 @@ spark-submit \
     --conf spark.driver.host="$DRIVER_IP" \
     --conf spark.driver.bindAddress="$DRIVER_IP" \
     --conf spark.dynamicAllocation.enabled=false \
-    --executor-memory 1g \
+    --conf spark.executor.extraJavaOptions="-XX:+UseG1GC" \
+    --conf spark.local.dir="/opt/spark/work" \
+    --executor-memory 768m \
     --driver-memory 512m \
     --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261,org.postgresql:postgresql:42.7.4 \
     "$(dirname "$0")/batch_analytics.py" \

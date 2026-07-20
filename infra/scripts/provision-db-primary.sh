@@ -23,18 +23,38 @@ DB_PASSWORD="$3"
 REPLICA_IP="$4"
 
 echo "=== [1/7] Installing PostgreSQL 16 ==="
-dnf install -y postgresql16-server postgresql16-contrib postgresql16-private-devel
+rm -f /etc/yum.repos.d/timescaledb.repo
+if rpm -q postgresql16-server >/dev/null 2>&1; then
+    echo "PostgreSQL 16 is already installed."
+elif ls /home/ec2-user/postgresql16-*.rpm >/dev/null 2>&1; then
+    echo "Installing PostgreSQL 16 from local RPMs..."
+    dnf localinstall -y /home/ec2-user/postgresql16-*.rpm
+else
+    echo "ERROR: Local PostgreSQL 16 RPMs not found at /home/ec2-user/." >&2
+    exit 1
+fi
+PGDATA="/var/lib/pgsql/data"
+if [ -d "$PGDATA" ] && [ "$(ls -A "$PGDATA")" ]; then
+    echo "WARNING: $PGDATA is not empty. Cleaning it up for fresh initialization..."
+    rm -rf "${PGDATA:?}"/*
+fi
 postgresql-setup --initdb
 
+echo "=== [1.5/7] Symlinking pg_config for TimescaleDB RPM compatibility ==="
+mkdir -p /usr/pgsql-16/bin
+ln -sf /usr/bin/pg_config /usr/pgsql-16/bin/pg_config
+
 echo "=== [2/7] Installing TimescaleDB ==="
-cat > /etc/yum.repos.d/timescaledb.repo <<'EOF'
-[timescaledb]
-name=TimescaleDB
-baseurl=https://packagecloud.io/timescale/timescaledb/el/9/$basearch
-gpgcheck=0
-enabled=1
-EOF
-dnf install -y timescaledb-2-postgresql-16
+if rpm -q timescaledb-2-postgresql-16 >/dev/null 2>&1; then
+    echo "TimescaleDB is already installed."
+elif ls /home/ec2-user/timescaledb-*.rpm >/dev/null 2>&1; then
+    echo "Installing TimescaleDB from local RPMs..."
+    dnf localinstall -y /home/ec2-user/timescaledb-*.rpm
+else
+    echo "ERROR: Local TimescaleDB RPM not found at /home/ec2-user/." >&2
+    echo "Please download the RPM on bastion and copy it here first." >&2
+    exit 1
+fi
 
 echo "=== [3/7] Fixing TimescaleDB paths (Amazon Linux 2023 compatibility) ==="
 # Amazon Linux repo installs PostgreSQL libs/extensions to different paths than PGDG.
@@ -43,8 +63,7 @@ echo "=== [3/7] Fixing TimescaleDB paths (Amazon Linux 2023 compatibility) ==="
 
 # Extension .so files
 ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.so /usr/lib64/pgsql/
-ln -sf /usr/lib64/timescaledb-pg16/timescaledb-2.27.1.so /usr/lib64/pgsql/
-ln -sf /usr/lib64/timescaledb-pg16/timescaledb-tsl-2.27.1.so /usr/lib64/pgsql/
+ln -sf /usr/lib64/timescaledb-pg16/timescaledb-*.so /usr/lib64/pgsql/
 
 # Extension control file
 ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.control /usr/share/pgsql/extension/
@@ -68,10 +87,19 @@ wal_keep_size = 256MB
 listen_addresses = '*'
 EOF
 
+# Ganti metode otentikasi ident default ke scram-sha-256 untuk TCP localhost agar Alloy bisa connect
+sed -i -E 's/(127\.0\.0\.1\/32\s+)ident/\1scram-sha-256/g' "$PGDATA/pg_hba.conf"
+sed -i -E 's/(::1\/128\s+)ident/\1scram-sha-256/g' "$PGDATA/pg_hba.conf"
+
+LOCAL_PREFIX=$(hostname -I | awk '{print $1}' | cut -d. -f1,2)
+
 cat >> "$PGDATA/pg_hba.conf" <<EOF
 
 # App node (applayer-1) — password auth
-host    all             ${DB_USER}       10.0.1.0/24       scram-sha-256
+host    all             ${DB_USER}       ${LOCAL_PREFIX}.1.0/24       scram-sha-256
+
+# App + services (dari private subnet — Spark Worker, etc.)
+host    all             ${DB_USER}       ${LOCAL_PREFIX}.2.0/24       scram-sha-256
 
 # Replication from replica (datalayer-2)
 host    replication     replicator       ${REPLICA_IP}/32   scram-sha-256
@@ -86,8 +114,9 @@ sudo -u postgres psql <<EOF
 CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';
 CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};
 GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};
+GRANT pg_monitor TO ${DB_USER};
 CREATE USER replicator WITH REPLICATION PASSWORD '${DB_PASSWORD}';
-SELECT pg_create_physical_replication_slot('node3_replica_slot');
+SELECT pg_create_physical_replication_slot('replica_datalayer2_slot');
 EOF
 
 echo "=== [7/7] Initializing schema ==="

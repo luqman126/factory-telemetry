@@ -104,7 +104,7 @@
       "datasource": "TimescaleDB",
       "targets": [
         {
-          "rawSql": "SELECT time, vibration_rms, location FROM sensor_readings WHERE $__timeFilter(time) AND vibration_rms IS NOT NULL ORDER BY time",
+          "rawSql": "SELECT time, vibration_rms, device_id || ' - ' || location FROM sensor_readings WHERE $__timeFilter(time) AND vibration_rms IS NOT NULL ORDER BY time",
           "format": "time_series",
           "refId": "A"
         }
