@@ -1,0 +1,46 @@
+- name: Install PostgreSQL 16 packages
+  ansible.builtin.dnf: 
+    name:
+      - postgresql16-server
+      - postgresql16
+    state: present
+
+- name: Install TimescaleDB
+  ansible.builtin.dnf:
+    name:
+      - timescaledb-2-postgresql-16
+    state: present
+
+- name: Symlink TimescaleDB loader
+  ansible.builtin.file:
+    src: /usr/lib64/timescaledb-loader-pg16/timescaledb.so
+    dest: /usr/lib64/pgsql/timescaledb.so
+    state: link
+
+- name: Perform base backup from primary database
+  ansible.builtin.command: >
+    PGPASSWORD="{{ db_password }}" pg_basebackup
+    -h "{{ primary_ip }}"
+    -U replicator
+    -D /var/lib/pgsql/data
+    -Fp -Xs -P -R
+    -S replica_datalayer2_slot
+  args:
+    creates: /var/lib/pgsql/data/PG_VERSION
+  register: basebackup_result
+  until: basebackup_result.rc == 0
+  retries: 30
+  delay: 10
+
+- name: Configure postgresql.conf for replica
+  ansible.builtin.blockinfile:
+    path: /var/lib/pgsql/data/postgresql.conf
+    block: |
+      hot_standby = on
+      primary_slot_name = 'replica_datalayer2_slot'
+
+- name: Ensure PostgreSQL service is started and enabled
+  ansible.builtin.systemd:
+    name: postgresql
+    state: started
+    enabled: true

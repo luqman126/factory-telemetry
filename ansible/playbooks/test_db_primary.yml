@@ -1,0 +1,8 @@
+---
+# Playbook to test the timescaledb_primary role
+- name: Test TimescaleDB Primary Role
+  hosts: local
+  gather_facts: false
+
+  roles:
+    - timescaledb_primary

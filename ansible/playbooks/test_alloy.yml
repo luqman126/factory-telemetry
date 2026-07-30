@@ -1,0 +1,8 @@
+---
+# Playbook to test the alloy_agent role
+- name: Test Grafana Alloy Agent Role
+  hosts: local
+  gather_facts: false
+
+  roles:
+    - alloy_agent

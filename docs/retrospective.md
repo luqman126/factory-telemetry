@@ -110,4 +110,22 @@ This document captures the key engineering failures, debugging processes, and au
 - **Cause:** The standalone Spark Master daemon was not started on `applayer-1` after staging environment reboots, preventing coordinator connections.
 - **Solution:** Added automated, self-healing initialization checking to `run_with_worker.sh`. The script now checks for the Master JVM process on launch, starts it dynamically if inactive, and automatically shuts it down during the `cleanup()` exit trap to free up compute resources when the job completes.
 
+---
+
+## 4. Configuration Management & Infrastructure State Challenges
+
+### Issue: SSH ProxyCommand Tunneling for Air-Gapped Private Subnet Nodes
+- **Symptom:** Running `ansible-playbook` against private database nodes (`datalayer-1`/`datalayer-2`) failed with `Connection closed by UNKNOWN port 65535`.
+- **Cause:** Standard `ProxyJump` did not pass the private key (`iot-bigdata-key.pem`) through for the second SSH hop inside Ansible's connection engine.
+- **Solution:** Configured OpenSSH `ProxyCommand` in `ansible/inventory/hosts.ini` with explicit key parameters: `-o ProxyCommand="ssh -i ~/.ssh/iot-bigdata-key.pem -W %h:%p -q ec2-user@100.105.19.59"`. Private nodes now accept Ansible tasks seamlessly over the Tailscale bastion tunnel without exposing raw web ports.
+
+### Issue: DNF Package Manager Backend Error on Control Node (Ubuntu vs AL2023)
+- **Symptom:** Running tasks with `ansible.builtin.dnf` against `localhost` failed with `Could not detect which major revision of dnf is in use`.
+- **Cause:** The local control node runs Ubuntu (`apt`), while target nodes run Amazon Linux 2023 (`dnf`). Running RPM tasks locally triggered package manager mismatch errors.
+- **Solution:** Kept `ansible.builtin.dnf` explicitly targeted at RPM nodes (`db_primary`, `db_replica`, `app_nodes`), and tested local playbook syntax separately from target host executions.
+
+### Issue: Terraform S3 Remote Backend Migration & Deprecated DynamoDB Locking
+- **Symptom:** Local `.tfstate` risked single-point-of-failure data loss and blocked collaboration. Using `dynamodb_table` for state locking triggered `Warning: dynamodb_table is deprecated. Use use_lockfile instead` in Terraform 1.10+.
+- **Cause:** Terraform 1.10+ introduced native S3 object lock files (`use_lockfile = true`) as a built-in replacement for external DynamoDB locking tables.
+- **Solution:** Created standalone `infra/terraform-bootstrap/` module to provision `iot-bigdata-terraform-state` S3 bucket with versioning and `prevent_destroy`. Migrated main infrastructure state via `terraform init -migrate-state` and configured native `use_lockfile = true` in `infra/terraform/main.tf`, eliminating DynamoDB table overhead and deprecation warnings completely.
 

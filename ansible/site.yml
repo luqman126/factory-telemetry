@@ -1,0 +1,29 @@
+---
+- name: Provision Primary Database Node
+  hosts: db_primary
+  become: true
+  vars:
+    alloy_enable_postgres: true
+    alloy_instance_name: "datalayer-1"
+  roles:
+    - timescaledb_primary
+    - alloy_agent
+
+- name: Provision Standby Replica Database Node
+  hosts: db_replica
+  become: true
+  vars:
+    alloy_enable_postgres: true
+    alloy_instance_name: "datalayer-2"
+  roles:
+    - timescaledb_replica
+    - alloy_agent
+
+- name: Provision Application & Monitoring Node
+  hosts: app_nodes
+  become: true
+  vars:
+    alloy_enable_postgres: false
+    alloy_instance_name: "applayer-1"
+  roles:
+    - alloy_agent
