@@ -1,4 +1,3 @@
 ---
 # Default variables for timescaledb_replica role
-primary_ip: "10.0.2.10"
-db_password: "telemetry_secure_pass"
+primary_ip: "10.1.2.10"

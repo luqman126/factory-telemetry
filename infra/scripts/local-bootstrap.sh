@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================
 # local-bootstrap.sh
-# Jalankan script ini di terminal lokal Anda (laptop) sebelum
-# melakukan rebuild environment (terraform destroy & apply).
+# Run this script on your local terminal or laptop
 # ============================================================
 set -euo pipefail
 
@@ -179,60 +178,10 @@ for attempt in {1..30}; do
     sleep 10
 done
 
-# 6. Jalankan Sinkronisasi RPM, script, dan init.sql di Bastion secara remote via AWS SSM Run Command
-echo ""
-echo "-> Memicu sinkronisasi paket RPM dan secrets di Bastion via AWS SSM..."
-COMMAND_ID=$(aws ssm send-command \
-  --instance-ids "$ORIG_BASTION_INSTANCE_ID" \
-  --document-name "AWS-RunShellScript" \
-  --parameters "{\"commands\":[
-    \"mkdir -p /home/ec2-user/iot-bigdata-project/infra/scripts /home/ec2-user/iot-bigdata-project/db\",
-    \"aws s3 cp s3://${ORIG_S3_BUCKET}/scripts/ /home/ec2-user/iot-bigdata-project/infra/scripts/ --recursive --region ${ORIG_AWS_REGION}\",
-    \"aws s3 cp s3://${ORIG_S3_BUCKET}/scripts/init.sql /home/ec2-user/iot-bigdata-project/db/init.sql --region ${ORIG_AWS_REGION}\",
-    \"chmod +x /home/ec2-user/iot-bigdata-project/infra/scripts/*.sh\",
-    \"chown -R ec2-user:ec2-user /home/ec2-user/iot-bigdata-project\",
-    \"sudo -i -u ec2-user /home/ec2-user/iot-bigdata-project/infra/scripts/sync-packages-to-s3.sh ${ORIG_ENV} ${ORIG_PROJECT_NAME}\"
-  ]}" \
-  --region "$ORIG_AWS_REGION" \
-  --query "Command.CommandId" \
-  --output text)
-
-echo "SSM Command sent dengan ID: $COMMAND_ID"
-echo "Menunggu command selesai..."
-aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$ORIG_BASTION_INSTANCE_ID" --region "$ORIG_AWS_REGION" || true
-
-# Ambil hasil output log secara bersih (raw text)
-STATUS=$(aws ssm get-command-invocation \
-  --command-id "$COMMAND_ID" \
-  --instance-id "$ORIG_BASTION_INSTANCE_ID" \
-  --region "$ORIG_AWS_REGION" \
-  --query "Status" \
-  --output text)
-
-echo "Status Eksekusi: $STATUS"
-
-echo ""
-echo "--- Log Output Bastion ---"
-aws ssm get-command-invocation \
-  --command-id "$COMMAND_ID" \
-  --instance-id "$ORIG_BASTION_INSTANCE_ID" \
-  --region "$ORIG_AWS_REGION" \
-  --query "StandardOutputContent" \
-  --output text
-
-if [ "$STATUS" != "Success" ]; then
-    echo ""
-    echo "--- Log Error Bastion ---"
-    aws ssm get-command-invocation \
-      --command-id "$COMMAND_ID" \
-      --instance-id "$ORIG_BASTION_INSTANCE_ID" \
-      --region "$ORIG_AWS_REGION" \
-      --query "StandardErrorContent" \
-      --output text
-    exit 1
-fi
-
 echo ""
 echo "============================================================"
-echo "    Setup Awal Selesai! Seluruh environment telah pulih.    "
+echo "    Infrastructure is ready!"
+echo "    Next step: Run Ansible to configure databases."
+echo ""
+echo "    bash infra/scripts/run-ansible.sh"
 echo "============================================================"

@@ -2,5 +2,5 @@
 # Default variables for timescaledb_primary role
 db_name: "factory_telemetry"
 db_user: "telemetry_user"
-db_password: "telemetry_secure_pass"
-replica_ip: "10.0.2.11"
+replica_ip: "10.1.2.20"
+allowed_cidr: "10.1.0.0/16"
