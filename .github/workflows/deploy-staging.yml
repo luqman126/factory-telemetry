@@ -8,7 +8,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: staging
+    environment: 
+      name: staging
 
     steps:
       - name: Checkout Code
@@ -144,18 +145,12 @@ jobs:
               sudo chmod +x /usr/libexec/docker/cli-plugins/docker-compose
             fi
 
-            # 3c. Deploy MQTT SSL Certificates
+            # 4b. Deploy MQTT SSL Certificates
             echo "-> Deploying MQTT SSL certificates..."
             chmod +x scripts/deploy-mqtt-cert.sh
             sudo ./scripts/deploy-mqtt-cert.sh "staging-mqtt.chescloud.my.id"
 
             docker compose up -d --build
-
-            # 4b. Setup Grafana Alloy monitoring agents across nodes
-            echo "-> Setting up Grafana Alloy monitoring agents..."
-            cd /home/ec2-user/iot-bigdata-project
-            chmod +x infra/scripts/setup-alloy-nodes.sh
-            ./infra/scripts/setup-alloy-nodes.sh
 
             # 5. Cek Status Service
             echo "-> Checking backend status..."
