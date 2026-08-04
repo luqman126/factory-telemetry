@@ -1,0 +1,12 @@
+---
+# ============================================================
+# ping.yml
+# Basic connectivity test playbook for Ansible Step 1
+# ============================================================
+- name: Test connectivity to target hosts
+  hosts: local
+  gather_facts: false
+
+  tasks:
+    - name: Ping target host
+      ansible.builtin.ping:

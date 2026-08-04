@@ -13,8 +13,13 @@ terraform {
     }
   }
 
-  # State disimpan lokal (akan migrasi ke S3 backend nanti)
-  # backend "s3" { ... }
+  backend "s3" {
+    bucket          = "iot-bigdata-terraform-state"
+    key             = "staging/terraform.tfstate"
+    region          = "ap-southeast-1"
+    use_lockfile    = true
+    encrypt         = true
+  }
 }
 
 provider "aws" {

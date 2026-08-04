@@ -25,12 +25,13 @@ ebs_volume_size         = 30
 
 # ---- Rincian AMI & Key Pair (SESUAIKAN DENGAN AKUN AWS ANDA) ----
 
-# AMI ID Amazon Linux 2023 di Region ap-southeast-1 (Singapore)
-# Secara default, ini adalah base AMI AL2023 (bisa disesuaikan jika perlu)
-ami_id = "ami-05b741ae2ab9f1742"
+# Custom AMI ID for applayer nodes
+applayer_ami_id = "ami-06300b37dd6a8f1ce"
 
-# Custom AMI ID untuk Spark Worker (Pre-installed Java 21 & Spark 3.5.8)
-# Diambil dari script spark-jobs/run_with_worker.sh
+# Custom AMI ID for database nodes
+datalayer_ami_id = "ami-0057a08287089dcfb"
+
+# Custom AMI ID for Spark Worker nodes (Pre-installed Java 21 & Spark 3.5.8)
 worker_ami_id = "ami-03256949a823ccf8b"
 
 # Nama EC2 Key Pair yang sudah terdaftar di AWS Console region ap-southeast-1

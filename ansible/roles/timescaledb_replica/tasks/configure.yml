@@ -1,0 +1,39 @@
+- name: Perform base backup from primary database
+  ansible.builtin.command: >
+    pg_basebackup
+    -h "{{ primary_ip }}"
+    -U replicator
+    -D /var/lib/pgsql/data
+    -Fp -Xs -P -R
+    -S replica_datalayer2_slot
+  environment:
+    PGPASSWORD: "{{ db_password }}"
+  args:
+    creates: /var/lib/pgsql/data/PG_VERSION
+  register: basebackup_result
+  until: basebackup_result.rc == 0
+  retries: 30
+  delay: 10
+  become: true
+  become_user: postgres
+
+- name: Configure postgresql.conf for replica
+  ansible.builtin.blockinfile:
+    path: /var/lib/pgsql/data/postgresql.conf
+    block: |
+      hot_standby = on
+      primary_slot_name = 'replica_datalayer2_slot'
+
+- name: Set permissions on PostgreSQL data directory
+  ansible.builtin.file:
+    path: /var/lib/pgsql/data
+    owner: postgres
+    group: postgres
+    mode: '0700'
+    recurse: true
+
+- name: Ensure PostgreSQL service is started and enabled
+  ansible.builtin.systemd:
+    name: postgresql
+    state: started
+    enabled: true

@@ -114,7 +114,7 @@ locals {
 
 # Ditempatkan di Public Subnet agar bisa diakses oleh client / IoT Device
 resource "aws_instance" "applayer" {
-  ami                         = var.ami_id
+  ami                         = var.applayer_ami_id
   instance_type               = var.applayer_instance_type
   subnet_id                   = aws_subnet.public.id
   key_name                    = var.key_pair_name
@@ -132,7 +132,6 @@ resource "aws_instance" "applayer" {
     aws_security_group.applayer.id
   ]
 
-  # Bootstrapping (Otomatisasi instalasi software saat pertama kali server menyala)
   user_data = <<EOF
 #!/bin/bash
 set -uo pipefail
@@ -142,6 +141,7 @@ log() {
     echo "[$(date -Is)] $*" >&2
 }
 
+# Function to fetch each paramater
 get_ssm_param() {
     aws ssm get-parameter \
       --name "$1" \
@@ -151,6 +151,7 @@ get_ssm_param() {
       --output text 2>/dev/null || true
 }
 
+# Function to fetch all the paramaters
 wait_ssm_param() {
     name="$1"
     label="$2"
@@ -171,23 +172,7 @@ wait_ssm_param() {
     return 1
 }
 
-# 1. Update system & install package dasar
-log "Installing base packages..."
-dnf update -y
-dnf install -y awscli git python3 python3-pip python3.12 java-21-amazon-corretto-devel
-
-# 2. Install & jalankan Docker + Docker Compose v2 (Standar AL2023)
-log "Installing Docker..."
-dnf install -y docker
-systemctl enable --now docker
-usermod -aG docker ec2-user
-
-# Download & install Docker Compose V2 secara manual karena tidak ada di repo AL2023
-mkdir -p /usr/libexec/docker/cli-plugins
-curl -SL https://github.com/docker/compose/releases/download/v2.26.1/docker-compose-linux-x86_64 -o /usr/libexec/docker/cli-plugins/docker-compose
-chmod +x /usr/libexec/docker/cli-plugins/docker-compose
-
-# 2.5 Tarik provisioning scripts dari S3 agar folder scripts lokal di Bastion langsung terisi lengkap
+# 1. Fetch the provisioning scripts from s3 so that the the local scripts directory on the Bastion host is populated automatically
 log "Waiting for scripts to be uploaded to S3..."
 until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/scripts/deploy-mqtt-cert.sh --region ${var.aws_region} &>/dev/null; do
   log "Still waiting for scripts in s3..."
@@ -200,24 +185,8 @@ aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec
 chmod +x /home/ec2-user/iot-bigdata-project/infra/scripts/*.sh
 chown -R ec2-user:ec2-user /home/ec2-user/iot-bigdata-project
 
-# 3. Install & configure Spark 3.5.8
-log "Installing Spark..."
-cd /opt
-curl -SL https://dlcdn.apache.org/spark/spark-3.5.8/spark-3.5.8-bin-hadoop3.tgz -o spark-3.5.8-bin-hadoop3.tgz
-tar -xzf spark-3.5.8-bin-hadoop3.tgz
-ln -sf /opt/spark-3.5.8-bin-hadoop3 /opt/spark
-rm -f spark-3.5.8-bin-hadoop3.tgz
-mkdir -p /opt/spark/logs /opt/spark/work
-chown -R ec2-user:ec2-user /opt/spark-3.5.8-bin-hadoop3 /opt/spark/logs /opt/spark/work
-echo 'export SPARK_HOME=/opt/spark' > /etc/profile.d/spark.sh
-echo 'export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin' >> /etc/profile.d/spark.sh
-
-# 4. Install & Configure Tailscale
-log "Installing Tailscale..."
-curl -fsSL https://tailscale.com/install.sh | sh
-systemctl enable --now tailscaled
-
-# Ambil Tailscale key dari SSM dan login secara otomatis
+# 2. Setup the Tailscale, SSL certificate, and Cloudflare Tunnel
+# Fetch the Tailscale key from SSM and login automatically
 TS_KEY="$(wait_ssm_param "/${var.project_name}/${var.environment}/TAILSCALE_AUTH_KEY" "Tailscale auth key")"
 if [ -n "$TS_KEY" ]; then
     log "Registering Tailscale with auth key..."
@@ -225,14 +194,7 @@ if [ -n "$TS_KEY" ]; then
     tailscale status || true
 fi
 
-# 5. Install Certbot & Cloudflare DNS Plugin untuk SSL (AL2023 pip method)
-log "Installing Certbot..."
-python3 -m venv /opt/certbot
-/opt/certbot/bin/pip install --upgrade pip
-/opt/certbot/bin/pip install certbot certbot-dns-cloudflare
-ln -sf /opt/certbot/bin/certbot /usr/bin/certbot
-
-# Ambil Cloudflare Token dari SSM dan terbitkan sertifikat SSL
+# Fetch the Cloudflare token from SSM and issue an SSL certificate
 CF_TOKEN="$(wait_ssm_param "/${var.project_name}/${var.environment}/CLOUDFLARE_API_TOKEN" "Cloudflare API token")"
 if [ -n "$CF_TOKEN" ]; then
     log "Requesting Let's Encrypt SSL cert via Certbot..."
@@ -252,11 +214,7 @@ SEC
       --deploy-hook "/home/ec2-user/iot-bigdata-project/infra/scripts/deploy-mqtt-cert.sh ${local.mqtt_subdomain}"
 fi
 
-# 6. Install & Configure Cloudflare Tunnel (cloudflared)
-curl -L --output cloudflared.rpm https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-x86_64.rpm
-dnf localinstall -y cloudflared.rpm
-rm -f cloudflared.rpm
-
+# Fetch the Tunnel token from SSM and setup the tunnel
 TUNNEL_TOKEN="$(wait_ssm_param "/${var.project_name}/${var.environment}/CLOUDFLARE_TUNNEL_TOKEN" "Cloudflare tunnel token")"
 if [ -n "$TUNNEL_TOKEN" ]; then
     log "Installing and starting cloudflared systemd service..."
@@ -305,7 +263,7 @@ resource "aws_eip" "applayer" {
 # ---- 3. EC2 Instance: Datalayer-1 (PostgreSQL DB Primary) ----
 # Ditempatkan di Private Subnet, menggunakan static IP untuk kemudahan replikasi
 resource "aws_instance" "datalayer_primary" {
-  ami                         = var.ami_id
+  ami                         = var.datalayer_ami_id
   instance_type               = var.datalayer_instance_type
   subnet_id                   = aws_subnet.private.id
   key_name                    = var.key_pair_name
@@ -317,48 +275,13 @@ resource "aws_instance" "datalayer_primary" {
     aws_security_group.datalayer.id
   ]
 
+  # Packages are pre-installed in the custom datalayer AMI.
+  # Database initialization, pg_hba, users, and replication are
+  # configured by Ansible (timescaledb_primary/tasks/configure.yml)
+  # triggered by the null_resource.ansible_configure below.
   user_data = <<EOF
 #!/bin/bash
-# 1. Tunggu hingga semua RPM dan script tersedia di S3 (diunggah oleh local-bootstrap.sh)
-until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/packages/sync_complete.flag --region ${var.aws_region} &>/dev/null; do
-    echo "Waiting for package sync to complete in S3..."
-    sleep 10
-done
-
-until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/scripts/ | grep -q 'provision-db'; do
-    echo "Waiting for scripts in S3..."
-    sleep 10
-done
-
-# 2. Buat folder download
-mkdir -p /home/ec2-user/db-pkg
-cd /home/ec2-user
-
-# 3. Tarik RPM dan script dari S3
-aws s3 cp s3://${var.project_name}-datalake-${var.environment}/packages/ /home/ec2-user/ --recursive --exclude "*" --include "*.rpm" --region ${var.aws_region}
-aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/db-pkg/ --recursive --region ${var.aws_region}
-
-# 4. Ambil parameter DB dari file rahasia di S3
-until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env; do
-    echo "Waiting for DB secrets in S3..."
-    sleep 10
-done
-aws s3 cp s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env /tmp/db-secrets.env
-chmod 600 /tmp/db-secrets.env
-source /tmp/db-secrets.env
-rm -f /tmp/db-secrets.env
-
-REPLICA_IP="${cidrhost(var.private_subnet_cidr, 20)}"
-
-# 5. Jalankan provisioning primary
-chmod +x /home/ec2-user/db-pkg/provision-db-primary.sh
-cp /home/ec2-user/db-pkg/init.sql /tmp/init.sql || true
-# 6. Jalankan provisioning primary
-cd /home/ec2-user/db-pkg
-./provision-db-primary.sh "$POSTGRES_DB" "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$REPLICA_IP"
-
-# 7. Fix ownership of ec2-user directory
-chown -R ec2-user:ec2-user /home/ec2-user
+echo "Datalayer Primary booted. Awaiting Ansible configuration."
 EOF
 
   root_block_device {
@@ -375,7 +298,7 @@ EOF
 # ---- 4. EC2 Instance: Datalayer-2 (PostgreSQL DB Replica) ----
 # Ditempatkan di Private Subnet, menggunakan static IP
 resource "aws_instance" "datalayer_replica" {
-  ami                         = var.ami_id
+  ami                         = var.datalayer_ami_id
   instance_type               = var.datalayer_instance_type
   subnet_id                   = aws_subnet.private.id
   key_name                    = var.key_pair_name
@@ -387,52 +310,13 @@ resource "aws_instance" "datalayer_replica" {
     aws_security_group.datalayer.id
   ]
 
+  # Packages are pre-installed in the custom datalayer AMI.
+  # Base backup, replication config, and service start are
+  # configured by Ansible (timescaledb_replica/tasks/configure.yml)
+  # triggered by the null_resource.ansible_configure below.
   user_data = <<EOF
 #!/bin/bash
-# 1. Tunggu hingga semua RPM dan script tersedia di S3 (diunggah oleh local-bootstrap.sh)
-until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/packages/sync_complete.flag --region ${var.aws_region} &>/dev/null; do
-    echo "Waiting for package sync to complete in S3..."
-    sleep 10
-done
-
-until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/scripts/ | grep -q 'provision-db'; do
-    echo "Waiting for scripts in S3..."
-    sleep 10
-done
-
-# 2. Buat folder download
-mkdir -p /home/ec2-user/db-pkg
-cd /home/ec2-user
-
-# 3. Tarik RPM dan script dari S3
-aws s3 cp s3://${var.project_name}-datalake-${var.environment}/packages/ /home/ec2-user/ --recursive --exclude "*" --include "*.rpm" --region ${var.aws_region}
-aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/db-pkg/ --recursive --region ${var.aws_region}
-
-# 4. Ambil parameter DB dari file rahasia di S3
-until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env; do
-    echo "Waiting for DB secrets in S3..."
-    sleep 10
-done
-aws s3 cp s3://${var.project_name}-datalake-${var.environment}/secrets/db-secrets.env /tmp/db-secrets.env
-chmod 600 /tmp/db-secrets.env
-source /tmp/db-secrets.env
-rm -f /tmp/db-secrets.env
-
-PRIMARY_IP="${cidrhost(var.private_subnet_cidr, 10)}"
-
-# 5. Tunggu hingga primary DB port 5432 aktif sebelum running replica script
-until timeout 3 bash -c "cat < /dev/null > /dev/tcp/$PRIMARY_IP/5432" 2>/dev/null; do
-    echo "Waiting for primary database at $PRIMARY_IP..."
-    sleep 5
-done
-
-# 6. Jalankan provisioning replica
-chmod +x /home/ec2-user/db-pkg/provision-db-replica.sh
-cd /home/ec2-user/db-pkg
-./provision-db-replica.sh "$PRIMARY_IP" "$POSTGRES_PASSWORD"
-
-# 7. Fix ownership of ec2-user directory
-chown -R ec2-user:ec2-user /home/ec2-user
+echo "Datalayer Replica booted. Awaiting Ansible configuration."
 EOF
 
   root_block_device {

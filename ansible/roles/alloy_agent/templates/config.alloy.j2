@@ -1,0 +1,46 @@
+// ============================================================
+// config.alloy.j2
+// Grafana Alloy Configuration Template managed by Ansible
+// ============================================================
+
+// 1. Host Node Exporter Metrics
+prometheus.exporter.unix "node_metrics" {
+}
+
+{% if alloy_enable_postgres | default(false) %}
+// PostgreSQL Exporter Metrics
+prometheus.exporter.postgres "postgres_metrics" {
+  data_source_names = ["postgresql://{{ db_user }}:{{ db_password }}@127.0.0.1:5432/{{ db_name }}?sslmode=disable"]
+}
+{% endif %}
+
+// 2. Instance Relabeling
+prometheus.relabel "rename_instance" {
+  forward_to = [prometheus.remote_write.prometheus_server.receiver]
+  rule {
+    action       = "replace"
+    target_label = "instance"
+    replacement  = "{{ alloy_instance_name | default(inventory_hostname) }}"
+  }
+}
+
+// Scrape Node Metrics
+prometheus.scrape "scrape_node" {
+  targets    = prometheus.exporter.unix.node_metrics.targets
+  forward_to = [prometheus.relabel.rename_instance.receiver]
+}
+
+{% if alloy_enable_postgres | default(false) %}
+// Scrape Postgres Metrics
+prometheus.scrape "scrape_postgres" {
+  targets    = prometheus.exporter.postgres.postgres_metrics.targets
+  forward_to = [prometheus.relabel.rename_instance.receiver]
+}
+{% endif %}
+
+// 3. Remote Write to Prometheus Server
+prometheus.remote_write "prometheus_server" {
+  endpoint {
+    url = "http://{{ prometheus_ip | default('127.0.0.1') }}:9090/api/v1/write"
+  }
+}

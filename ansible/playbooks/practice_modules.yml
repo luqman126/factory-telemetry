@@ -1,0 +1,42 @@
+---
+# ============================================================
+# practice_modules.yml
+# Step 2: Core Modules Practice Playbook
+# ============================================================
+- name: Practice Core Ansible Modules
+  hosts: local
+  gather_facts: false
+
+  vars:
+    server_port: 8080
+    environment_name: "staging"
+    max_connections: 500
+    practice_dir: "/tmp/ansible_practice"
+
+  tasks:
+    - name: "1. FILE MODULE: Create target directory"
+      ansible.builtin.file:
+        path: "{{ practice_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: "2. TEMPLATE MODULE: Render dynamic Jinja2 template"
+      ansible.builtin.template:
+        src: "../templates/sample_service.conf.j2"
+        dest: "{{ practice_dir }}/service.conf"
+        mode: '0644'
+
+    - name: "3. LINEINFILE MODULE: Ensure kernel setting exists in sysctl_custom.conf"
+      ansible.builtin.lineinfile:
+        path: "{{ practice_dir }}/sysctl_custom.conf"
+        line: "vm.max_map_count = 262144"
+        create: true
+        state: present
+
+    - name: "4. COPY MODULE: Create inline static file"
+      ansible.builtin.copy:
+        content: |
+          # Static config file created by Ansible copy module
+          feature_flag_x = enabled
+        dest: "{{ practice_dir }}/static.conf"
+        mode: '0644'
