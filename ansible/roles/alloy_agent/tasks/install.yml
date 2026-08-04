@@ -1,0 +1,13 @@
+- name: Configure Grafama RPM Repository
+  ansible.builtin.yum_repository:
+    name: grafana
+    description: Grafana Official Repository
+    baseurl: https://rpm.grafana.com
+    gpgcheck: true
+    gpgkey: https://rpm.grafana.com/gpg.key
+    enabled: true
+
+- name: Install Grafana Alloy agent
+  ansible.builtin.dnf:
+    name: alloy
+    state: present

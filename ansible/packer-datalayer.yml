@@ -1,0 +1,14 @@
+---
+- name: Build Datalayer Custom AMI
+  hosts: default
+  become: true
+  tasks:
+    - name: Install PostgreSQL 16 & TimescaleDB
+      ansible.builtin.include_role:
+        name: timescaledb_primary
+        tasks_from: install.yml
+    
+    - name: Install Grafana Alloy Agent
+      ansible.builtin.include_role:
+        name: alloy_agent
+        tasks_from: install.yml

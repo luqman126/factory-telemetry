@@ -1,0 +1,11 @@
+- name: Deploy Grafana Alloy configuration file
+  ansible.builtin.template:
+    src: config.alloy.j2
+    dest: /etc/alloy/config.alloy
+    mode: '0644'
+
+- name: Ensure Alloy agent is started and enabled
+  ansible.builtin.systemd:
+    name: alloy
+    state: started
+    enabled: true

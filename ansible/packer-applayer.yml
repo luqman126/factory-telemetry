@@ -1,0 +1,103 @@
+---
+- name: Build Applayer Custom AMI
+  hosts: default
+  become: true
+  tasks:
+    - name: Install base RPM packages
+      ansible.builtin.dnf:
+        name:
+          - awscli
+          - git
+          - python3
+          - python3-pip
+          - python3.12
+          - java-21-amazon-corretto-devel
+          - docker
+        state: present
+
+    - name: Enable Docker service 
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+      register: docker_status
+      ignore_errors: true
+
+    - name: Add ec2-user to docker group
+      ansible.builtin.user:
+        name: ec2-user
+        groups: docker
+        append: true
+
+    - name: Install Docker Compose V2 plugin
+      ansible.builtin.get_url:
+        url: https://github.com/docker/compose/releases/download/v2.26.1/docker-compose-linux-x86_64
+        dest: /usr/libexec/docker/cli-plugins/docker-compose
+        mode: '0755'
+
+    - name: Download and unpack Apache Spark 3.5.8
+      ansible.builtin.shell: |
+        curl -fsSL https://dlcdn.apache.org/spark/spark-3.5.8/spark-3.5.8-bin-hadoop3.tgz | tar -xzC /opt
+      args:
+        creates: /opt/spark-3.5.8-bin-hadoop3
+
+    - name: Symlink Spark directory
+      ansible.builtin.file:
+        src: /opt/spark-3.5.8-bin-hadoop3
+        dest: /opt/spark
+        state: link
+
+    - name: Create Spark profile script
+      ansible.builtin.copy:
+        content: |
+          export SPARK_HOME=/opt/spark
+          export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin
+        dest: /etc/profile.d/spark.sh
+        mode: '0644'
+
+    - name: Check Spark logs and work directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: ec2-user
+        group: ec2-user
+      loop:
+        - /opt/spark/logs
+        - /opt/spark/work
+
+    - name: Set Spark directory ownership to ec2-user
+      ansible.builtin.file:
+        path: /opt/spark-3.5.8-bin-hadoop3
+        owner: ec2-user
+        group: ec2-user
+        recurse: true
+
+    - name: Install Tailscale
+      ansible.builtin.shell: |
+        curl -fsSL https://tailscale.com/install.sh | sh
+      args:
+        creates: /usr/bin/tailscale
+
+    - name: Install Certbot and Cloudflare DNS plugin in virtualenv
+      ansible.builtin.pip:
+        name:
+          - certbot
+          - certbot-dns-cloudflare
+        virtualenv: /opt/certbot
+        virtualenv_command: python3 -m venv
+
+    - name: Symlink Certbot executable
+      ansible.builtin.file:
+        src: /opt/certbot/bin/certbot
+        dest: /usr/bin/certbot
+        state: link
+
+    - name: Install Cloudflared CLI
+      ansible.builtin.dnf:
+        name: https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-x86_64.rpm
+        state: present
+        disable_gpg_check: true
+
+    - name: Install Grafana Alloy agent
+      ansible.builtin.include_role:
+        name: alloy_agent
+        tasks_from: install.yml

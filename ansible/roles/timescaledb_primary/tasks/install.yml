@@ -1,0 +1,30 @@
+- name: Configure TimescaleDB RPM Repository
+  ansible.builtin.yum_repository:
+    name: timescale_timescaledb
+    description: TimescaleDB Official Repository
+    baseurl: https://packagecloud.io/timescale/timescaledb/el/9/$basearch
+    repo_gpgcheck: true
+    gpgcheck: false
+    enabled: true
+    gpgkey: https://packagecloud.io/timescale/timescaledb/gpgkey
+    sslverify: true
+    sslcacert: /etc/pki/tls/certs/ca-bundle.crt
+
+- name: Install PostgreSQL 16 packages
+  ansible.builtin.dnf: 
+    name:
+      - postgresql16-server
+      - postgresql16
+    state: present
+
+- name: Install TimescaleDB
+  ansible.builtin.dnf:
+    name:
+      - timescaledb-2-postgresql-16
+    state: present
+
+- name: Symlink TimescaleDB loader
+  ansible.builtin.file:
+    src: /usr/lib64/timescaledb-loader-pg16/timescaledb.so
+    dest: /usr/lib64/pgsql/timescaledb.so
+    state: link

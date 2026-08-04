@@ -1,0 +1,109 @@
+- name: Database initialization
+  ansible.builtin.command: postgresql-setup --initdb
+  args:
+    creates: /var/lib/pgsql/data/PG_VERSION
+
+- name: Configure postgresql.conf for TimescaleDB and Replication
+  ansible.builtin.blockinfile:
+    path: /var/lib/pgsql/data/postgresql.conf
+    block: |
+      shared_preload_libraries = 'timescaledb'
+      wal_level = replica
+      max_wal_senders = 3
+      max_replication_slots = 3
+      wal_keep_size = 256MB
+      listen_addresses = '*'
+
+- name: Update localhost auth method to scram-sha-256 in pg_hba.conf
+  ansible.builtin.replace:
+    path: /var/lib/pgsql/data/pg_hba.conf
+    regexp: '(127\.0\.0\.1/32\s+|::1/128\s+)ident'
+    replace: '\1scram-sha-256'
+
+- name: Configure pg_hba.conf for app nodes and replica nodes
+  ansible.builtin.blockinfile:
+    path: /var/lib/pgsql/data/pg_hba.conf
+    block: |
+      # Internal VPC network access
+      host    all             {{ db_user }}       {{ allowed_cidr }}       scram-sha-256
+
+      # Streaming replication access 
+      host    replication     replicator          {{ replica_ip }}/32       scram-sha-256
+
+- name: Ensure PostgreSQL service is started and enabled
+  ansible.builtin.systemd:
+    name: postgresql
+    state: started
+    enabled: true
+
+# Should be located in the installation phase
+- name: Ensure python3-psycopg2 is installed on live node
+  ansible.builtin.dnf:
+    name: python3-psycopg2
+    state: present
+
+- name: Create application database user
+  community.postgresql.postgresql_user:
+    name: "{{ db_user }}"
+    password: "{{ db_password }}"
+    state: present
+  become: true
+  become_user: postgres
+
+- name: Create telemetry database
+  community.postgresql.postgresql_db:
+    name: "{{ db_name }}"
+    owner: "{{ db_user }}"
+    state: present
+  become: true
+  become_user: postgres
+
+- name: Grant all privileges on database to user
+  community.postgresql.postgresql_privs:
+    db: "{{ db_name }}"
+    privs: ALL
+    type: database
+    role: "{{ db_user }}"
+  become: true
+  become_user: postgres
+
+- name: Grant pg_monitor role to application node 
+  community.postgresql.postgresql_membership:
+    group: pg_monitor
+    target_roles: "{{ db_user }}"
+    state: present
+  become: true
+  become_user: postgres
+
+# Should be located in the installation phase
+- name: Fix TimescaleDB paths for Amazon Linux 2023 compatibility
+  ansible.builtin.shell: |
+    ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.so /usr/lib64/pgsql/
+    ln -sf /usr/lib64/timescaledb-pg16/timescaledb-*.so /usr/lib64/pgsql/
+    ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.control /usr/share/pgsql/extension/
+    ln -sf /usr/lib64/timescaledb-pg16/timescaledb--*.sql /usr/share/pgsql/extension/
+
+- name: Enable TimescaleDB extension
+  community.postgresql.postgresql_ext:
+    name: timescaledb
+    db: "{{ db_name }}"
+    state: present
+  become: true
+  become_user: postgres
+
+- name: Create replication user
+  community.postgresql.postgresql_user:
+    name: "replicator"
+    password: "{{ db_password }}"
+    role_attr_flags: REPLICATION
+    state: present
+  become: true
+  become_user: postgres
+
+- name: Create physical replication slot for replica
+  community.postgresql.postgresql_slot:
+    slot_name: replica_datalayer2_slot
+    slot_type: physical
+    state: present
+  become: true
+  become_user: postgres
