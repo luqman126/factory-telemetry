@@ -67,10 +67,14 @@ variable "datalayer_instance_type" {
   default     = "t3.small"
 }
 
-variable "ami_id" {
-  description = "AMI ID Amazon Linux 2023 (region-specific)"
+variable "applayer_ami_id" {
+  description = "Custom AMI ID for applayer nodes (Base RPM packages + Tailscale + Certbot + Cloudflared CLI + Alloy Agent)"
   type        = string
-  # Amazon Linux 2023 di ap-southeast-1 — update jika perlu
+}
+
+variable "datalayer_ami_id" {
+  description = "Custom AMI ID for database nodes (Postgresql + TimescaleDB + Alloy Agent)"
+  type        = string
 }
 
 variable "worker_ami_id" {

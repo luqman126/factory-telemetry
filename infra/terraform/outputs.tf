@@ -8,6 +8,11 @@ output "vpc_id" {
   value       = aws_vpc.main.id
 }
 
+output "vpc_cidr" {
+  description = "CIDR block VPC"
+  value       = aws_vpc.main.cidr_block
+}
+
 output "public_subnet_id" {
   description = "ID Public Subnet"
   value       = aws_subnet.public.id
@@ -71,10 +76,6 @@ output "connection_info" {
     ============================================
     ${upper(var.environment)} Environment Ready!
     ============================================
-    Bastion (applayer):  ssh ec2-user@${aws_eip.applayer.public_ip}
-    DB Primary:          ssh -J ec2-user@${aws_eip.applayer.public_ip} ec2-user@${aws_instance.datalayer_primary.private_ip}
-    DB Replica:          ssh -J ec2-user@${aws_eip.applayer.public_ip} ec2-user@${aws_instance.datalayer_replica.private_ip}
-    ============================================
-
+    
   EOT
 }
