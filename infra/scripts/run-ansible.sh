@@ -36,6 +36,7 @@ BASTION_INSTANCE_ID="${BASTION_INSTANCE_ID:-$(cd "$TERRAFORM_DIR" && terraform o
 PRIMARY_IP="${PRIMARY_IP:-$(cd "$TERRAFORM_DIR" && terraform output -raw datalayer_1_private_ip 2>/dev/null || echo "10.1.2.10")}"
 REPLICA_IP="${REPLICA_IP:-$(cd "$TERRAFORM_DIR" && terraform output -raw datalayer_2_private_ip 2>/dev/null || echo "10.1.2.20")}"
 ALLOWED_CIDR="${ALLOWED_CIDR:-$(cd "$TERRAFORM_DIR" && terraform output -raw vpc_cidr 2>/dev/null || echo "10.1.0.0/16")}"
+PROMETHEUS_IP="${PROMETHEUS_IP:-$(cd "$TERRAFORM_DIR" && terraform output -raw applayer_private_ip 2>/dev/null || echo "")}"
 
 if [ -z "$BASTION_INSTANCE_ID" ]; then
     echo "ERROR: Could not retrieve Bastion Instance ID from Terraform outputs." >&2
@@ -47,13 +48,23 @@ echo "   Bastion Instance ID : $BASTION_INSTANCE_ID"
 echo "   DB Primary IP       : $PRIMARY_IP"
 echo "   DB Replica IP       : $REPLICA_IP"
 echo "   Allowed VPC CIDR    : $ALLOWED_CIDR"
+echo "   Prometheus IP       : $PROMETHEUS_IP"
 
 PROJECT_NAME="${PROJECT_NAME:-iot-bigdata}"
 ENV="${ENV:-staging}"
 
-echo "-> Fetching database credentials from AWS SSM Parameter Store..."
+echo "-> Fetching environment credentials from AWS SSM Parameter Store..."
+CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-$(aws ssm get-parameter --name "/${PROJECT_NAME}/${ENV}/CLOUDFLARE_API_TOKEN" --with-decryption --region "$AWS_REGION" --query "Parameter.Value" --output text 2>/dev/null || echo "")}"
+CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN:-$(aws ssm get-parameter --name "/${PROJECT_NAME}/${ENV}/CLOUDFLARE_TUNNEL_TOKEN" --with-decryption --region "$AWS_REGION" --query "Parameter.Value" --output text 2>/dev/null || echo "")}"
+DOMAIN_NAME="${DOMAIN_NAME:-$(aws ssm get-parameter --name "/${PROJECT_NAME}/${ENV}/DOMAIN_NAME" --region "$AWS_REGION" --query "Parameter.Value" --output text 2>/dev/null || echo "chescloud.my.id")}"
+if [ "$ENV" = "production" ]; then
+    MQTT_SUBDOMAIN="mqtt.${DOMAIN_NAME}"
+else
+    MQTT_SUBDOMAIN="${ENV}-mqtt.${DOMAIN_NAME}"
+fi
+
 DB_NAME="${DB_NAME:-$(aws ssm get-parameter --name "/${PROJECT_NAME}/${ENV}/POSTGRES_DB" --region "$AWS_REGION" --query "Parameter.Value" --output text 2>/dev/null || echo "factory_telemetry")}"
-DB_USER="${DB_USER:-$(aws ssm get-parameter --name "/${PROJECT_NAME}/${ENV}/POSTGRES_USER" --region "$AWS_REGION" --query "Parameter.Value" --output text 2>/dev/null || echo "telemetry_user")}"
+DB_USER="${DB_USER:-$(aws ssm get-parameter --name "/${PROJECT_NAME}/${ENV}/POSTGRES_USER" --region "$AWS_REGION" --query "Parameter.Value" --output text 2>/dev/null || echo "kagebyo")}"
 DB_PASSWORD="${DB_PASSWORD:-$(aws ssm get-parameter --name "/${PROJECT_NAME}/${ENV}/POSTGRES_PASSWORD" --with-decryption --region "$AWS_REGION" --query "Parameter.Value" --output text 2>/dev/null || echo "")}"
 
 if [ -z "$DB_PASSWORD" ]; then
@@ -147,7 +158,7 @@ echo ""
 echo "-> Executing ansible-playbook site.yml..."
 ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook \
   -i "$INVENTORY_FILE" \
-  --extra-vars "db_name=$DB_NAME db_user=$DB_USER db_password=$DB_PASSWORD replica_ip=$REPLICA_IP primary_ip=$PRIMARY_IP allowed_cidr=${ALLOWED_CIDR:-10.1.0.0/16}" \
+  --extra-vars "db_name=$DB_NAME db_user=$DB_USER db_password=$DB_PASSWORD replica_ip=$REPLICA_IP primary_ip=$PRIMARY_IP allowed_cidr=${ALLOWED_CIDR:-10.1.0.0/16} prometheus_ip=$PROMETHEUS_IP cloudflare_api_token=$CLOUDFLARE_API_TOKEN cloudflare_tunnel_token=$CLOUDFLARE_TUNNEL_TOKEN mqtt_subdomain=$MQTT_SUBDOMAIN domain_name=$DOMAIN_NAME" \
   "$ANSIBLE_DIR/site.yml"
 
 # --- 6. Clean up temporary inventory ---

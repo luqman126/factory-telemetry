@@ -25,5 +25,7 @@
   vars:
     alloy_enable_postgres: false
     alloy_instance_name: "applayer-1"
+    prometheus_ip: "127.0.0.1"
   roles:
+    - applayer
     - alloy_agent

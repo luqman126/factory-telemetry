@@ -123,9 +123,7 @@ resource "aws_instance" "applayer" {
 
   depends_on = [
     aws_iam_role_policy.least_privilege,
-    aws_ssm_parameter.cloudflare_api_token,
-    aws_ssm_parameter.tailscale_auth_key,
-    aws_ssm_parameter.cloudflare_tunnel_token
+    aws_ssm_parameter.tailscale_auth_key
   ]
 
   vpc_security_group_ids = [
@@ -135,108 +133,25 @@ resource "aws_instance" "applayer" {
   user_data = <<EOF
 #!/bin/bash
 set -uo pipefail
-exec > >(tee -a /var/log/iot-user-data.log | logger -t iot-user-data -s 2>/dev/console) 2>&1
+exec > >(tee -a /var/log/iot-user-data.log) 2>&1
 
-log() {
-    echo "[$(date -Is)] $*" >&2
-}
+# Fetch Tailscale auth key from SSM (guaranteed to exist via depends_on)
+TS_KEY="$(aws ssm get-parameter \
+  --name "/${var.project_name}/${var.environment}/TAILSCALE_AUTH_KEY" \
+  --with-decryption --region ${var.aws_region} \
+  --query "Parameter.Value" --output text 2>/dev/null || true)"
 
-# Function to fetch each paramater
-get_ssm_param() {
-    aws ssm get-parameter \
-      --name "$1" \
-      --with-decryption \
-      --region ${var.aws_region} \
-      --query "Parameter.Value" \
-      --output text 2>/dev/null || true
-}
-
-# Function to fetch all the paramaters
-wait_ssm_param() {
-    name="$1"
-    label="$2"
-    attempts=30
-    delay=10
-
-    for attempt in $(seq 1 "$attempts"); do
-        value="$(get_ssm_param "$name")"
-        if [ -n "$value" ] && [ "$value" != "placeholder_do_not_delete" ] && [ "$value" != "None" ]; then
-            printf '%s' "$value"
-            return 0
-        fi
-        log "Waiting for $label in SSM ($attempt/$attempts)..."
-        sleep "$delay"
-    done
-
-    log "WARN: $label is missing or still placeholder after $((attempts * delay)) seconds."
-    return 1
-}
-
-# 1. Fetch the provisioning scripts from s3 so that the the local scripts directory on the Bastion host is populated automatically
-log "Waiting for scripts to be uploaded to S3..."
-until aws s3 ls s3://${var.project_name}-datalake-${var.environment}/scripts/deploy-mqtt-cert.sh --region ${var.aws_region} &>/dev/null; do
-  log "Still waiting for scripts in s3..."
-  sleep 10
-done
-
-log "Downloading provisioning scripts from S3..."
-mkdir -p /home/ec2-user/iot-bigdata-project/infra/scripts
-aws s3 cp s3://${var.project_name}-datalake-${var.environment}/scripts/ /home/ec2-user/iot-bigdata-project/infra/scripts/ --recursive --region ${var.aws_region}
-chmod +x /home/ec2-user/iot-bigdata-project/infra/scripts/*.sh
-chown -R ec2-user:ec2-user /home/ec2-user/iot-bigdata-project
-
-# 2. Setup the Tailscale, SSL certificate, and Cloudflare Tunnel
-# Fetch the Tailscale key from SSM and login automatically
-TS_KEY="$(wait_ssm_param "/${var.project_name}/${var.environment}/TAILSCALE_AUTH_KEY" "Tailscale auth key")"
 if [ -n "$TS_KEY" ]; then
-    log "Registering Tailscale with auth key..."
+    echo "[$(date -Is)] Registering Tailscale..."
     tailscale up --authkey="$TS_KEY" --accept-routes --accept-dns=true
     tailscale status || true
+    echo "[$(date -Is)] Tailscale Registered."
+else
+    echo "[$(date -Is)] WARN: Tailscale auth key not found in SSM."
 fi
 
-# Fetch the Cloudflare token from SSM and issue an SSL certificate
-CF_TOKEN="$(wait_ssm_param "/${var.project_name}/${var.environment}/CLOUDFLARE_API_TOKEN" "Cloudflare API token")"
-if [ -n "$CF_TOKEN" ]; then
-    log "Requesting Let's Encrypt SSL cert via Certbot..."
-    mkdir -p /etc/letsencrypt
-    cat <<SEC > /etc/letsencrypt/cloudflare.ini
-dns_cloudflare_api_token = $CF_TOKEN
-SEC
-    chmod 600 /etc/letsencrypt/cloudflare.ini
-    
-    # Jalankan Certbot DNS-01 challenge untuk domain staging / production dengan deploy-hook untuk auto-renewal
-    certbot certonly --dns-cloudflare \
-      --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
-      -d "${local.mqtt_subdomain}" \
-      --email "admin@${var.domain_name}" \
-      --agree-tos --no-eff-email \
-      --non-interactive \
-      --deploy-hook "/home/ec2-user/iot-bigdata-project/infra/scripts/deploy-mqtt-cert.sh ${local.mqtt_subdomain}"
-fi
-
-# Fetch the Tunnel token from SSM and setup the tunnel
-TUNNEL_TOKEN="$(wait_ssm_param "/${var.project_name}/${var.environment}/CLOUDFLARE_TUNNEL_TOKEN" "Cloudflare tunnel token")"
-if [ -n "$TUNNEL_TOKEN" ]; then
-    log "Installing and starting cloudflared systemd service..."
-    cloudflared service install "$TUNNEL_TOKEN"
-    systemctl enable --now cloudflared
-    systemctl status cloudflared --no-pager || true
-fi
-
-log "Applayer bootstrap finished."
+echo "[$(date -Is)] Applayer boot complete. Awaiting Ansible configuration."
 EOF
-
-  # Execute local-bootstrap after applayer instance and S3 bucket is ready
-  provisioner "local-exec" {
-    command = "bash ${path.module}/../scripts/local-bootstrap.sh --post-apply"
-    environment = {
-      AWS_REGION          = var.aws_region
-      S3_BUCKET           = aws_s3_bucket.datalake.id
-      BASTION_INSTANCE_ID = self.id
-      ENV                 = var.environment
-      PROJECT_NAME        = var.project_name
-    }
-  }
 
   root_block_device {
     volume_size           = var.ebs_volume_size

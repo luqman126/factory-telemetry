@@ -21,8 +21,10 @@
   ansible.builtin.blockinfile:
     path: /var/lib/pgsql/data/postgresql.conf
     block: |
+      listen_addresses = '*'
       hot_standby = on
       primary_slot_name = 'replica_datalayer2_slot'
+  register: replica_config
 
 - name: Set permissions on PostgreSQL data directory
   ansible.builtin.file:
@@ -31,6 +33,12 @@
     group: postgres
     mode: '0700'
     recurse: true
+
+- name: Restart PostgreSQL if configuration changed
+  ansible.builtin.systemd:
+    name: postgresql
+    state: restarted
+  when: replica_config.changed
 
 - name: Ensure PostgreSQL service is started and enabled
   ansible.builtin.systemd:

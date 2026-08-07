@@ -1,0 +1,54 @@
+- name: Set default project directory if not defined
+  ansible.builtin.set_fact:
+    app_project_dir: "{{ app_project_dir | default(ansible_user_dir ~ '/iot-bigdata-project') }}"
+
+- name: Ensure /etc/letsencrypt directory exists
+  ansible.builtin.file:
+    path: /etc/letsencrypt
+    state: directory
+    mode: '0755'
+
+- name: Create Certbot Cloudflare credentials file for DNS challenge
+  ansible.builtin.copy:
+    content: "dns_cloudflare_api_token = {{ cloudflare_api_token }}"
+    dest: /etc/letsencrypt/cloudflare.ini
+    mode: '0600'
+
+- name: Ensure scripts directory exists
+  ansible.builtin.file:
+    path: "{{ app_project_dir }}/infra/scripts"
+    state: directory
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_id }}"
+    mode: '0755'
+
+- name: Copy deploy-mqtt-cert.sh script
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../infra/scripts/deploy-mqtt-cert.sh"
+    dest: "{{ app_project_dir }}/infra/scripts/deploy-mqtt-cert.sh"
+    mode: '0755'
+
+- name: Issue Let's Encrypt SSL certificate for MQTT broker
+  ansible.builtin.command: >
+    certbot certonly --dns-cloudflare
+    --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini
+    -d "{{ mqtt_subdomain }}"
+    --email "admin@{{ domain_name }}"
+    --agree-tos --no-eff-email --non-interactive
+    --deploy-hook "{{ app_project_dir }}/infra/scripts/deploy-mqtt-cert.sh {{ mqtt_subdomain }}"
+  args:
+    creates: /etc/letsencrypt/live/{{ mqtt_subdomain }}/fullchain.pem
+
+- name: Install and start Cloudflare Tunnel service
+  when: cloudflare_tunnel_token | default('') | length > 30 
+  block:
+    - name: Install cloudflared tunnel service
+      ansible.builtin.command: cloudflared service install "{{ cloudflare_tunnel_token }}"
+      args:
+        creates: /etc/systemd/system/cloudflared.service
+
+    - name: Enable and start cloudflared service
+      ansible.builtin.systemd:
+        name: cloudflared
+        state: started
+        enabled: true

@@ -91,6 +91,26 @@
   become: true
   become_user: postgres
 
+- name: Copy database init.sql schema to primary node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../db/init.sql"
+    dest: /tmp/init.sql
+    mode: '0644'
+
+- name: Execute init.sql schema migration
+  ansible.builtin.command: >
+    sudo -u postgres psql -d {{ db_name }} -f /tmp/init.sql
+
+- name: Transfer table ownership to application database user
+  ansible.builtin.command: >
+    sudo -u postgres psql -d {{ db_name }} -c "
+      ALTER TABLE IF EXISTS sensor_readings OWNER TO {{ db_user }};
+      ALTER TABLE IF EXISTS devices OWNER TO {{ db_user }};
+      ALTER TABLE IF EXISTS analytics_results OWNER TO {{ db_user }};
+      ALTER TABLE IF EXISTS anomaly_events OWNER TO {{ db_user }};
+      ALTER TABLE IF EXISTS spark_job_log OWNER TO {{ db_user }};
+    "
+
 - name: Create replication user
   community.postgresql.postgresql_user:
     name: "replicator"

@@ -114,6 +114,13 @@ resource "aws_ssm_parameter" "s3_bucket" {
   description = "AWS S3 data lake bucket name"
 }
 
+resource "aws_ssm_parameter" "domain_name" {
+  name        = "/${var.project_name}/${var.environment}/DOMAIN_NAME"
+  type        = "String"
+  value       = var.domain_name
+  description = "Domain name for SSL cert and DNS"
+}
+
 # ---- Spark Config ----
 resource "aws_ssm_parameter" "spark_master_url" {
   name        = "/${var.project_name}/${var.environment}/SPARK_MASTER_URL"
