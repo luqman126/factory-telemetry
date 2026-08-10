@@ -28,5 +28,7 @@ Thumbs.db
 
 # Terraform
 infra/terraform/*.auto.tfvars
+infra/terraform/*.secrets.tfvars
+infra/terraform/environments/*.secrets.tfvars
 infra/terraform/.terraform/
 infra/terraform/terraform.tfstate*

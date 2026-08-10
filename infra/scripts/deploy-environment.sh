@@ -13,15 +13,28 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 TERRAFORM_DIR="${PROJECT_DIR}/infra/terraform"
 ENV="${1:-staging}"
 
+if [[ "$ENV" != "staging" && "$ENV" != "production" ]]; then
+    echo "ERROR: Invalid environment '${ENV}'." >&2
+    echo "       Allowed environments: staging, production" >&2
+    exit 1
+fi
+
 echo "============================================================"
 echo "    IoT Big Data — End-to-End Environment Deployer (${ENV})"
 echo "============================================================"
 
-# --- Phase 1: Terraform Plan ---
+# --- Phase 1: Terraform Init & Plan ---
 echo ""
-echo "=== [Phase 1/3] Planning Infrastructure Changes ==="
+echo "=== [Phase 1/3] Initializing Backend & Planning Infrastructure (${ENV}) ==="
 cd "${TERRAFORM_DIR}"
-terraform plan -var-file="environments/${ENV}.tfvars" -out="${ENV}.tfplan"
+terraform init -backend-config="key=${ENV}/terraform.tfstate" -reconfigure
+
+SECRET_OPT=""
+if [ -f "environments/${ENV}.secrets.tfvars" ]; then
+    SECRET_OPT="-var-file=environments/${ENV}.secrets.tfvars"
+fi
+
+terraform plan -var-file="environments/${ENV}.tfvars" ${SECRET_OPT} -out="${ENV}.tfplan"
 
 # --- Phase 2: Terraform Apply ---
 echo ""
@@ -31,9 +44,9 @@ rm -f "${ENV}.tfplan"
 
 # --- Phase 3: Configure Database Cluster & Monitoring via Ansible ---
 echo ""
-echo "=== [Phase 3/3] Configuring Services with Ansible ==="
+echo "=== [Phase 3/3] Configuring Services with Ansible (${ENV}) ==="
 cd "${SCRIPT_DIR}"
-bash "${SCRIPT_DIR}/run-ansible.sh"
+ENV="${ENV}" bash "${SCRIPT_DIR}/run-ansible.sh"
 
 echo ""
 echo "============================================================"

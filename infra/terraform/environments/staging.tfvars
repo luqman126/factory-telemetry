@@ -1,6 +1,5 @@
 # ============================================================
-# infra/terraform/environments/staging.tfvars
-# Variabel spesifik untuk Staging Environment
+# VARIABLES FOR STAGING ENVIRONMENT
 # ============================================================
 
 # Nama environment
