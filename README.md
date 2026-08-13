@@ -1,43 +1,32 @@
-# IoT Big Data: Factory Telemetry & Control Pipeline
+# IoT Big Data: Factory Telemetry and Control Pipeline
 
-An end-to-end IoT telemetry ingestion, processing, and closed-loop control system built on AWS with self-hosted open-source components. Designed to monitor factory environments in real time, trigger actuator responses within milliseconds, and archive sensor data for long-term analytics.
+> End-to-end IoT telemetry pipeline for factory monitoring with real-time MQTT ingestion, hourly Spark anomaly detection, and millisecond closed-loop actuator control. Self-hosted on AWS, fully automated with Terraform, Packer, and Ansible.
 
-### Project Highlights
-- **✔ Secure MQTT over TLS** on port 8883 with Mosquitto broker
-- **✔ High Availability TimescaleDB Replication** with active streaming slots
-- **✔ Apache Spark Batch Analytics** for hourly aggregation and anomaly detection
-- **✔ Amazon S3 Data Lake** with compressed Parquet archival
-- **✔ Infrastructure as Code** via Terraform (VPC, IAM, compute, networking)
-- **✔ Observability with Grafana** including Prometheus, Alloy agents, and Telegram alerts
-- **✔ GitHub Actions Deployment** with Tailscale VPN integration
-- **✔ Private AWS Networking** with air-gapped database nodes in isolated subnets
+[Infrastructure Guide](docs/infrastructure.md) · [Database Runbook](docs/database.md) · [Spark Analytics](docs/spark-analytics.md) · [Edge Integration](docs/edge-device-integration.md)
 
 ---
 
-## Versions
+## Table of Contents
 
-| Version | Tag | Summary |
-|:---|:---|:---|
-| v1.0 | [`v1.0-college-project`](docs/versions/v1.0.md) | College deadline release — core pipeline, manual provisioning |
-| v2.0 | [`v2.0`](docs/versions/v2.0.md) | Terraform IaC, CI/CD, closed-loop control, provisioning automation |
-
----
-
-## Project Overview
-
-This project builds a full-stack IoT monitoring pipeline for a simulated manufacturing facility. Sensors across three factory zones continuously stream temperature, vibration, and gas readings to a cloud backend over MQTT. The backend validates, stores, and analyzes the data in real time, and when a dangerous condition is detected (e.g., overheating), it publishes a control command back to the device within milliseconds.
-
-The raw telemetry is stored in a TimescaleDB time-series database with automatic partitioning. For long-term retention and heavy analytical workloads, data is exported hourly to Amazon S3 as compressed Parquet files and processed by Apache Spark batch jobs running in local mode on the application host.
-
-The entire infrastructure (networking, compute, security, secrets) is defined as Terraform code and can be deployed from scratch with a single command.
+- [What I Built and Why](#what-i-built-and-why)
+- [Versions](#versions)
+- [Architecture and System Overview](#architecture-and-system-overview)
+- [Prerequisites](#prerequisites)
+- [Quick Start and Setup](#quick-start-and-setup)
+- [Project Directory Layout](#project-directory-layout)
+- [Verification and Testing](#verification-and-testing)
+- [What I Learned](#what-i-learned)
+- [Future Improvements](#future-improvements)
+- [Documentation](#documentation)
+- [License](#license)
 
 ---
 
-## Why This Project? (Design Philosophy)
+## What I Built and Why
 
-### The Use Case
+### The Problem
 
-The system monitors three operational zones inside a factory:
+A factory floor has three operational zones, each with different environmental risks. If a soldering station overheats, the cooling fan must activate within milliseconds, not minutes. Regulatory bodies require months of environmental records, but storing raw high-frequency sensor data in a database indefinitely is financially unsustainable. And the monitoring system itself cannot be a single point of failure: if the database goes down, a hot standby must take over without data loss.
 
 | Zone | Sensors | Business Risk |
 |:---|:---|:---|
@@ -45,10 +34,23 @@ The system monitors three operational zones inside a factory:
 | **Soldering Area** (`ruang_penyolderan`) | Temperature, Gas/VOC (MQ-135) | Toxic flux fumes endanger worker health and violate safety regulations |
 | **Storage Area** (`ruang_penyimpanan`) | Temperature | Excessive heat damages stored components and raw materials |
 
-The factory needs:
-- **Instant reaction**: If a soldering station overheats, the cooling fan must activate in milliseconds, not minutes.
-- **Audit trail**: Regulatory bodies require months of environmental records, but storing raw high-frequency data in a database indefinitely is financially unsustainable.
-- **Minimal downtime**: The monitoring system itself cannot be a single point of failure. If the database goes down, a hot standby must take over without data loss.
+### The Solution
+
+This project is a full-stack IoT monitoring pipeline for a simulated manufacturing facility. Sensors across three factory zones continuously stream temperature, vibration, and gas readings to a cloud backend over TLS-encrypted MQTT. The backend validates, stores, and analyzes the data in real time. When a dangerous condition is detected (e.g., overheating), it publishes a control command back to the device within milliseconds.
+
+Raw telemetry is stored in a TimescaleDB time-series database with automatic hypertable partitioning. For long-term retention and heavy analytical workloads, data is exported hourly to Amazon S3 as compressed Parquet files and processed by Apache Spark batch jobs for aggregation and anomaly detection.
+
+The entire infrastructure (networking, compute, security, secrets) is defined as Terraform code and can be deployed to staging or production with a single script.
+
+### Key Engineering Highlights
+
+| Decision | Rationale | Outcome |
+|:---|:---|:---|
+| Self-hosted TimescaleDB with streaming replication instead of Amazon RDS | Demonstrate WAL management, replication slot configuration, and manual failover procedures | Zero-RPO standby replica with active streaming replication slot |
+| Packer custom AMIs with Ansible provisioning instead of bash scripts | v1.0 bash scripts were fragile and not idempotent; re-running them on a live system caused failures | Provisioning time reduced from ~15 min to ~2 min; fully idempotent re-runs |
+| Spark Local Mode for hourly batch instead of always-on distributed cluster | CPU utilization sits at 1-2% between hourly runs; dedicated workers waste resources for 59 minutes per hour | 28.56s processing time for 1M records with zero idle resource cost |
+| Closed-loop MQTT control instead of one-way telemetry | Factory safety requires immediate actuator response when overheating is detected | Millisecond fan control response via MQTT publish-back from backend |
+| Air-gapped database subnet with no internet routing | Database nodes should never be directly reachable from the public internet | Zero attack surface on database layer; S3 access via free VPC Gateway Endpoint |
 
 ### Why Self-Hosted Instead of Managed Services?
 
@@ -65,119 +67,349 @@ This project deliberately uses self-hosted open-source components instead of man
 
 ---
 
-### System Architecture
-```mermaid
-flowchart TB
-    subgraph Edge["Edge Layer"]
-        Sim["IoT Simulator"]
-        Fan["Cooling Fan"]
-    end
+## Versions
 
-    subgraph VPC["AWS VPC (Terraform-managed)"]
-        subgraph Pub["applayer-1 · Public Subnet"]
-            Broker["Mosquitto Broker<br/>(MQTT TLS 8883 + ACL)"]
-            API["FastAPI Backend"]
-            Spark["Apache Spark<br/>(Local Mode)"]
-            Grafana["Grafana + Prometheus"]
-        end
-
-        subgraph Priv["Private Subnet (no internet)"]
-            DB1["datalayer-1<br/>TimescaleDB Primary"]
-            DB2["datalayer-2<br/>TimescaleDB Standby"]
-        end
-    end
-
-    S3[("S3 Data Lake")]
-    GHA["GitHub Actions"]
-
-    %% CI/CD
-    GHA -->|"Tailscale VPN + rsync"| API
-
-    %% Real-time ingestion
-    Sim -->|"Telemetry<br/>(incl. fan_status)"| Broker
-    Broker --> API
-    API -->|"INSERT"| DB1
-
-    %% Closed-loop control (v2.0: reads fan_status from payload)
-    API -->|"Fan command"| Broker
-    Broker -.->|"Control"| Sim
-    Sim -.-> Fan
-
-    %% Replication
-    DB1 <-->|"Streaming<br/>Replication"| DB2
-
-    %% Hourly batch pipeline (runs on applayer-1)
-    DB2 -.->|"Read replica"| Spark
-    Spark -->|"Export Parquet"| S3
-    S3 -->|"Read Parquet"| Spark
-    Spark -->|"Write analytics"| DB1
-
-    %% Monitoring
-    Grafana -->|"Query"| DB1
-
-    classDef edgeStyle fill:#f3e8ff,stroke:#8b5cf6,stroke-width:2px,color:#5b21b6
-    classDef pubStyle fill:#f0fdfa,stroke:#0d9488,stroke-width:2px,color:#115e59
-    classDef privStyle fill:#eff6ff,stroke:#2563eb,stroke-width:2px,color:#1e40af
-    classDef awsStyle fill:#fffbeb,stroke:#d97706,stroke-width:2px,color:#92400e
-    classDef ciStyle fill:#fff1f2,stroke:#e11d48,stroke-width:2px,color:#9f1239
-
-    class Sim,Fan edgeStyle
-    class Broker,API,Spark,Grafana pubStyle
-    class DB1,DB2 privStyle
-    class S3 awsStyle
-    class GHA ciStyle
-```
+| Version | Tag | Summary |
+|:---|:---|:---|
+| v1.0 | [`v1.0-college-project`](docs/versions/v1.0.md) | College deadline release: core pipeline, manual provisioning |
+| v2.0 | [`v2.0`](docs/versions/v2.0.md) | Terraform IaC, CI/CD, closed-loop control, Packer AMIs, Ansible automation |
 
 ---
 
-## Infrastructure
+## Architecture and System Overview
+
+![Architecture Topology](docs/architecture.jpg)
+
+*To generate an automated baseline version of this topology, run `cd docs && python3.12 diagram.py`.*
+
+
+### Component Breakdown
+
+| Component | Location | Technology | Responsibility |
+|:---|:---|:---|:---|
+| MQTT Broker | `infra/mosquitto/` | Eclipse Mosquitto 2 | TLS-encrypted IoT telemetry ingestion on port 8883 |
+| Backend API | `backend/app/` | FastAPI, Paho MQTT, Uvicorn | MQTT message processing, database writes, closed-loop control |
+| Database (Primary) | `db/init.sql` | PostgreSQL 16, TimescaleDB 2.x | Time-series storage with hypertable partitioning |
+| Database (Replica) | `ansible/roles/timescaledb_replica/` | PostgreSQL 16 Streaming Replication | Hot standby for read offloading and disaster recovery |
+| Batch Analytics | `spark-jobs/` | Apache Spark 3.5, PySpark | Hourly aggregation, anomaly detection, S3 Parquet archival |
+| IoT Simulator | `simulator/` | Python, Paho MQTT | Multi-device telemetry simulation with anomaly injection |
+| Monitoring | `grafana/provisioning/`, `infra/prometheus/` | Grafana, Prometheus, Alloy | Dashboards, alerting (Telegram), metrics collection |
+| Infrastructure | `infra/terraform/` | Terraform | VPC, subnets, EC2, IAM, S3, security groups |
+| AMI Pipeline | `infra/packer/`, `ansible/` | Packer, Ansible | Custom AMI builds with baked-in packages and configuration |
+| CI/CD | `.github/workflows/` | GitHub Actions, Tailscale VPN | Automated deployment to staging and production |
 
 ### AWS Network Topology
 
 The infrastructure runs on a custom VPC with public and private subnets in `ap-southeast-1`:
 
-| Subnet | CIDR | What Lives Here | Internet Access |
-|:---|:---|:---|:---|
-| **Public** (`10.x.1.0/24`) | Bastion / App host | Mosquitto, FastAPI, Grafana, Spark Master | Yes (via Internet Gateway) |
-| **Private** (`10.x.2.0/24`) | Database + Workers | TimescaleDB Primary, Standby, Spark Workers | None (air-gapped) |
+| Subnet | What Lives Here | Internet Access |
+|:---|:---|:---|
+| **Public** (`10.x.1.0/24`) | Mosquitto, FastAPI, Grafana, Spark | Yes (via Internet Gateway) |
+| **Private** (`10.x.2.0/24`) | TimescaleDB Primary, TimescaleDB Standby | None (air-gapped) |
 
 ### Security Boundaries
+
 - Database nodes have **no public IP** and **zero internet routing**. All S3 communication goes through the free VPC Gateway Endpoint over AWS internal fiber.
-- SSH access to private nodes is only possible by jumping through the Bastion host, which requires Tailscale VPN authentication.
+- SSH access to private nodes is only possible by jumping through the applayer host, which requires Tailscale VPN authentication.
 - Grafana dashboards are exposed via Cloudflare Tunnel, so no raw web ports are open to the public internet.
+- MQTT TLS certificates are provisioned automatically by Certbot using DNS-01 challenge via Cloudflare API.
 
 ### Deployment Flow
-Infrastructure is provisioned entirely through Terraform. On `terraform apply`, a `local-exec` provisioner automatically:
-1. Uploads provisioning scripts and database packages to S3.
-2. Waits for the Bastion's SSM agent to come online.
-3. Triggers remote package synchronization via AWS SSM Run Command.
-4. Database nodes poll S3 for the completion flag, then install and configure PostgreSQL, TimescaleDB, and streaming replication autonomously.
+
+Infrastructure is provisioned through a three-phase pipeline:
+
+1. **AMI Build (Packer + Ansible):** `packer build` creates custom Amazon Machine Images for both applayer and datalayer nodes. Ansible roles install and pre-configure all software (PostgreSQL 16, TimescaleDB, Java 21, Spark 3.5, Docker, Grafana Alloy) at image build time.
+
+2. **Infrastructure Provisioning (Terraform):** `terraform apply` provisions the VPC, subnets, security groups, S3 buckets, IAM roles, SSM parameters, and launches EC2 instances from the custom AMIs. Each node's `user_data` script registers with the Tailscale mesh VPN on boot.
+
+3. **Post-Deploy Configuration (Ansible):** `run-ansible.sh` dynamically generates an inventory from Terraform outputs, fetches secrets from AWS SSM Parameter Store, and runs Ansible playbooks to configure TimescaleDB streaming replication, Certbot SSL certificates, Cloudflare Tunnel, and Grafana Alloy monitoring agents.
+
+The master orchestrator script `deploy-environment.sh <staging|production>` runs Terraform plan, apply, and Ansible in sequence with environment-specific variables and S3 state isolation.
+
+### Key Design Decisions
+
+See the full Architecture Decision Records in [`docs/adr/`](docs/adr/):
+
+- **[ADR-001: Decouple Database Layer](docs/adr/ADR-001-decouple-database-layer.md)** - Why PostgreSQL was separated from the application host into dedicated private subnet nodes
 
 ---
 
-## Technology Stack
+## Prerequisites
 
-| Category | Technologies |
-|:---|:---|
-| **Languages** | Python 3.12, SQL, Bash, HCL |
-| **Backend** | FastAPI, Pydantic, Paho MQTT, Uvicorn |
-| **Database** | PostgreSQL 16, TimescaleDB 2.x (hypertables + retention policies) |
-| **Analytics** | Apache Spark 3.5, PySpark |
-| **Broker** | Eclipse Mosquitto (MQTT over TLS) |
-| **Cloud** | AWS EC2, S3, IAM, SSM Parameter Store, VPC Gateway Endpoints |
-| **Infrastructure** | Terraform, Docker Compose, Tailscale VPN, Cloudflare Tunnel |
-| **Monitoring** | Prometheus, Grafana, Grafana Alloy, Postgres Exporter |
-| **CI/CD** | GitHub Actions |
+| Tool | Minimum Version | Purpose |
+|:---|:---|:---|
+| Terraform | 1.11+ | AWS infrastructure provisioning |
+| Packer | 1.9+ | Custom AMI builds |
+| Ansible | 2.15+ | Configuration management and AMI provisioning |
+| AWS CLI | 2.x | AWS authentication and resource inspection |
+| Docker | 24.0+ | Container runtime for Mosquitto, Grafana, Prometheus |
+| Docker Compose | 2.20+ | Multi-container orchestration on applayer host |
+| Python | 3.12+ | Backend, simulator, and Spark analytics |
+| Java | 21+ | Apache Spark runtime |
+| Tailscale | Latest | Mesh VPN for CI/CD and SSH access to private nodes |
 
 ---
 
-## Performance Evaluation
+## Quick Start and Setup
 
-> *This section is updated as new benchmarks are conducted.*
+This project involves multiple infrastructure layers (networking, database provisioning, TLS certificates, DNS configuration). There is no single "quick start" command.
 
-Benchmarked on AWS `t3.small` nodes (1 vCPU, 2GB RAM) running Apache Spark 3.5.
+### 1. Bootstrap the Terraform Backend
 
-### 1,000,000 Records (~64MB Parquet)
+```bash
+cd infra/terraform-bootstrap
+terraform init && terraform apply
+```
+
+This creates the S3 bucket and DynamoDB table for Terraform remote state locking.
+
+### 2. Build Custom AMIs with Packer
+
+```bash
+cd infra/packer
+
+# Build datalayer AMI (PostgreSQL 16, TimescaleDB, Java 21)
+packer build datalayer.pkr.hcl
+
+# Build applayer AMI (Docker, Spark 3.5, Grafana Alloy)
+packer build applayer.pkr.hcl
+```
+
+### 3. Configure Environment Secret Variables
+
+```bash
+# Create secret variables file for target environment (e.g. staging or production)
+cp infra/terraform/environments/staging.tfvars infra/terraform/environments/staging.secrets.tfvars
+# Fill in Cloudflare API tokens, Tailscale auth key, Cloudflare tunnel token
+```
+
+> Secrets for deployed EC2 nodes are managed in AWS SSM Parameter Store and fetched dynamically by Ansible during execution.
+
+### 4. Deploy Infrastructure
+
+```bash
+cd infra/scripts
+./deploy-environment.sh staging    # or: ./deploy-environment.sh production
+```
+
+This runs `terraform plan`, `terraform apply`, and `run-ansible.sh` in sequence.
+
+### 5. Verify
+
+After deployment, check that all services are healthy.
+
+> **Note:** Replace `<YOUR_DOMAIN>`, `<MQTT_USER>`, and `<MQTT_PASS>` with your actual values before running.
+
+```bash
+# Check MQTT TLS connectivity
+mosquitto_pub -h mqtt.<YOUR_DOMAIN> -p 8883 \
+  --capath /etc/ssl/certs \
+  -u <MQTT_USER> -P <MQTT_PASS> \
+  -t "factory/device_001/telemetry" \
+  -m '{"temperature": 25.3}'
+
+# Check Grafana dashboard
+curl -s https://grafana.<YOUR_DOMAIN>/api/health
+```
+
+**Expected output (Grafana health):**
+```json
+{"commit":"...","database":"ok","version":"..."}
+
+Refer to the [documentation guides](#documentation) for detailed setup instructions per component.
+```
+
+## Project Directory Layout
+
+```text
+iot-bigdata-project/
+├── .github/workflows/              # CI/CD pipeline definitions
+│   ├── deploy-staging.yml          # Deploys on push to staging branch
+│   └── deploy-production.yml       # Deploys on push to main branch
+│
+├── ansible/                        # Configuration management
+│   ├── ansible.cfg                 # Ansible settings
+│   ├── site.yml                    # Main playbook entrypoint
+│   ├── packer-applayer.yml         # Packer build playbook for applayer AMI
+│   ├── packer-datalayer.yml        # Packer build playbook for datalayer AMI
+│   ├── inventory/                  # Host inventory files
+│   ├── playbooks/                  # Standalone playbooks
+│   ├── roles/                      # Ansible roles
+│   │   ├── alloy_agent/            # Grafana Alloy monitoring agent setup
+│   │   ├── applayer/               # Certbot SSL, Cloudflare Tunnel, scripts
+│   │   ├── timescaledb_primary/    # Primary DB setup, init.sql migration
+│   │   └── timescaledb_replica/    # Streaming replication configuration
+│   └── templates/                  # Jinja2 templates for configs
+│
+├── backend/                        # Real-time telemetry ingestion service
+│   ├── app/
+│   │   ├── main.py                 # FastAPI application entrypoint
+│   │   ├── db.py                   # Database connection management
+│   │   ├── models/                 # Pydantic data validation schemas
+│   │   ├── mqtt/                   # MQTT consumer and control publisher
+│   │   └── routes/                 # REST API endpoints
+│   └── requirements.txt
+│
+├── simulator/                      # IoT device telemetry simulator
+│   ├── simulator.py                # Multi-device MQTT simulator with anomaly injection
+│   └── requirements.txt
+│
+├── spark-jobs/                     # Batch analytics pipeline
+│   ├── batch_analytics.py          # Aggregation and anomaly detection
+│   ├── export_to_parquet.py        # TimescaleDB replica to S3 Parquet export
+│   ├── run_hourly_pipeline.sh      # Systemd-triggered pipeline orchestrator
+│   ├── run_with_worker.sh          # Ephemeral distributed worker launcher
+│   ├── generate_bulk_data.py       # Synthetic data generator for benchmarks
+│   └── requirements.txt
+│
+├── benchmarks/                     # Performance testing and comparison
+│   ├── bench_ingestion.py          # MQTT ingestion throughput tests
+│   ├── bench_spark_idempotency.py  # Spark analytics correctness tests
+│   ├── compare_results.py          # Local vs distributed comparison
+│   ├── run_comparison.sh           # Benchmark orchestrator script
+│   └── results/                    # Benchmark output data
+│
+├── db/
+│   └── init.sql                    # Database schema, hypertables, retention policies
+│
+├── grafana/provisioning/           # Grafana as-code provisioning
+│   ├── alerting/                   # Alert rules and notification policies
+│   ├── dashboards/                 # Dashboard JSON definitions
+│   └── datasources/                # TimescaleDB and Prometheus connections
+│
+├── infra/                          # Infrastructure and deployment
+│   ├── docker-compose.yml          # Mosquitto, Grafana, Prometheus containers
+│   ├── .env.example                # Environment variable template
+│   ├── mosquitto/                  # MQTT broker config, TLS certs, ACL
+│   ├── prometheus/                 # Scrape targets and recording rules
+│   ├── alloy/                      # Grafana Alloy agent configuration
+│   ├── systemd/                    # Service and timer unit files
+│   ├── packer/                     # AMI build definitions
+│   │   ├── applayer.pkr.hcl        # Applayer AMI template
+│   │   └── datalayer.pkr.hcl       # Datalayer AMI template
+│   ├── scripts/                    # Deployment automation
+│   │   ├── deploy-environment.sh   # Master orchestrator (plan, apply, ansible)
+│   │   ├── run-ansible.sh          # Dynamic inventory + ansible-playbook runner
+│   │   ├── deploy-mqtt-cert.sh     # TLS certificate deployment helper
+│   │   └── fetch-secrets.sh        # SSM Parameter Store secret fetcher
+│   ├── terraform/                  # Infrastructure as Code
+│   │   ├── main.tf                 # Provider and S3 backend configuration
+│   │   ├── compute.tf              # EC2 instances and user_data
+│   │   ├── network.tf              # VPC, subnets, route tables, endpoints
+│   │   ├── security.tf             # Security groups and ingress/egress rules
+│   │   ├── secrets.tf              # SSM Parameter Store definitions
+│   │   ├── s3.tf                   # Data lake bucket configuration
+│   │   ├── variables.tf            # Input variable declarations
+│   │   ├── outputs.tf              # Terraform output values
+│   │   └── environments/           # Per-environment tfvars files
+│   └── terraform-bootstrap/        # One-time S3 backend and DynamoDB setup
+│
+├── docs/                           # Technical documentation
+│   ├── architecture.jpg            # System topology architecture diagram
+│   ├── diagram.py                  # Diagrams-as-Code generator (Python)
+│   ├── infrastructure.md           # AWS topology and architecture
+│   ├── database.md                 # Replication, failover, and WAL management
+│   ├── spark-analytics.md          # Pipeline design and scaling benchmarks
+│   ├── edge-device-integration.md  # MQTT payload schemas and validation
+│   ├── retrospective.md            # Chronological engineering failure log
+│   ├── adr/                        # Architecture Decision Records
+│   └── versions/                   # Release notes per version
+│
+├── .gitignore
+├── LICENSE
+└── README.md
+```
+
+---
+
+## Verification and Testing
+
+### MQTT Ingestion Test
+
+Start the simulator to verify the full ingestion path (simulator to Mosquitto to FastAPI to TimescaleDB):
+
+```bash
+cd simulator
+python3.12 simulator.py
+```
+
+Expected output:
+```
+Connected to MQTT broker at mqtt.your-domain.com:8883
+Publishing telemetry for device_001 (ruang_produksi)...
+Publishing telemetry for device_002 (ruang_penyolderan)...
+Publishing telemetry for device_003 (ruang_penyimpanan)...
+```
+
+### Spark Analytics Pipeline
+
+Manually trigger the hourly batch pipeline on `applayer-1`:
+
+```bash
+sudo systemctl start iot-analytics.service
+sudo journalctl -u iot-analytics.service --no-pager -n 20
+```
+
+Expected output:
+```
+=== [date] Memulai Pipeline Batch Spark per-Jam ===
+Menjalankan export_to_parquet.py...
+Berhasil query N baris dari DB
+Upload ke S3: s3://bucket-name/raw/sensor_YYYYMMDD_HHMMSS_YYYYMMDD_HHMMSS.parquet
+Memicu spark-submit untuk batch_analytics.py...
+=== [date] Pipeline Batch Spark Jam-an Selesai dengan Sukses ===
+```
+
+### Database Replication Status
+
+Verify streaming replication is active on `datalayer-1`:
+
+```sql
+SELECT client_addr, state, sent_lsn, write_lsn, replay_lsn
+FROM pg_stat_replication;
+```
+
+Expected: one row with `state = streaming` and matching LSN values.
+
+### Benchmark Suite
+
+Run the full Spark local-vs-distributed comparison (uses custom Python scripts with PySpark and SQLAlchemy):
+
+```bash
+cd benchmarks
+./run_comparison.sh
+```
+
+This runs `batch_analytics.py` across Local Mode, 1-Worker, and 2-Worker configurations, comparing execution time, record counts, and idempotency. Results are saved to `benchmarks/results/`.
+
+See [Spark Analytics Guide](docs/spark-analytics.md) for benchmark methodology, Amdahl's Law analysis, and full results.
+
+---
+
+## What I Learned
+
+### 1. Air-Gapped Subnets Block Software Installation
+
+**Challenge:** Database nodes in the private subnet have zero internet routing. Standard `dnf install` and `pip install` commands fail completely, making it impossible to install PostgreSQL, TimescaleDB, or Java through conventional means.
+
+**Solution:** v1.0 used a package relay pipeline: the applayer node downloads all RPMs, uploads them to S3, and private nodes pull packages through the free VPC Gateway Endpoint. v2.0 replaced this entirely with Packer custom AMIs that bake all packages at image build time using Ansible roles.
+
+**Outcome:** v1.0 package relay took approximately 15 minutes per node. v2.0 Packer AMIs reduced provisioning to approximately 2 minutes (boot to fully configured).
+
+**Deep-dive:** [Infrastructure Guide](docs/infrastructure.md)
+
+---
+
+### 2. Distributed Computing: Amdahl's Law in Practice
+
+**Challenge:** Assumed adding Spark workers would improve batch processing speed linearly. Deployed ephemeral EC2 workers to distribute the Spark workload.
+
+**Solution:** Benchmarked three configurations (Local Mode, 1 Worker, 2 Workers) across two dataset sizes on `t3.small` instances (1 vCPU, 2GB RAM) running Apache Spark 3.5.
+
+**Outcome:**
+
+#### 1,000,000 Records (~64MB Parquet)
+
 | Scenario | Workers | Avg Duration |
 |:---|:---|:---|
 | Local Mode | 0 | **28.56 s** |
@@ -186,86 +418,48 @@ Benchmarked on AWS `t3.small` nodes (1 vCPU, 2GB RAM) running Apache Spark 3.5.
 
 **Finding: Negative Scaling.** For datasets smaller than single-node RAM capacity, distributed coordination overhead (JVM startup, network shuffles, database connection contention) exceeds the parallel computation benefit.
 
-### 5,000,000 Records (~320MB Parquet)
+#### 5,000,000 Records (~320MB Parquet)
+
 | Scenario | Workers | Result |
 |:---|:---|:---|
 | Local Mode (Master Only) | 0 | **Fatal Crash (OOM)** |
 | 1 Distributed Worker | 1 | **155.77 s** |
 | 2 Distributed Workers | 2 | **211.29 s** |
 
-**Finding: The Architectural Necessity of Distribution.** When processing the massive 5M dataset, `Local Mode` instantly exhausted the master node's 512MB heap limit, causing a fatal OS kernel panic due to a `tmpfs` RAM disk spill. Offloading the compute to dedicated Ephemeral Workers protected the master node and successfully completed the analytics. 1 Worker remained faster than 2 Workers due to database lock contention.
+**Finding: The Architectural Necessity of Distribution.** When processing the 5M dataset, Local Mode exhausted the master node's 512MB heap limit, causing a fatal OS kernel panic due to a `/tmp` RAM disk spill. Offloading compute to dedicated Ephemeral Workers protected the master node. 1 Worker remained faster than 2 Workers due to database lock contention during concurrent writes.
 
-Detailed analysis and Amdahl's Law breakdown available in the [Spark Analytics Guide](docs/spark-analytics.md).
+The production workflow runs in Local Mode for cost efficiency. Ephemeral distribution is validated as a scaling path for datasets exceeding single-node memory capacity.
 
----
-
-## Engineering Challenges & Lessons Learned
-
-- **Resource contention forced architectural decoupling.** Running PostgreSQL, Spark, and the FastAPI backend on a single host caused database connection drops during batch processing. This led to separating the database into dedicated private subnet nodes, eliminating resource contention entirely.
-- **Private subnets block everything, including software installation.** Database nodes in the private subnet cannot reach external package repositories. We built a package sync pipeline: the Bastion downloads all RPMs, uploads them to S3, and private nodes pull packages through the free VPC Gateway Endpoint.
-- **Distributed computing isn't a silver bullet, but it's an architectural necessity.** Adding Spark workers made the job slower for a 64MB dataset due to coordination overhead (JVM startup, network shuffles, S3 API latency), validating Amdahl's Law in practice. However, for a 320MB dataset, running in Local Mode caused a fatal OS-level kernel panic due to a `/tmp` RAM disk spill. Ephemeral distribution became mandatory to protect the master node from catastrophic Out-Of-Memory crashes. *Note: The daily production workflow runs in Local Mode for cost and simplicity; ephemeral distribution was validated as a scaling path for datasets exceeding single-node memory capacity.*
-- **Infrastructure provisioning has hidden timing dependencies.** Terraform's `local-exec` fires before the SSM agent finishes registering on a new EC2 instance. We resolved this by polling `PingStatus = Online` before sending remote commands.
+**Deep-dive:** [Spark Analytics Guide](docs/spark-analytics.md)
 
 ---
 
-## Repository Structure
+### 3. Infrastructure Provisioning Has Hidden Timing Dependencies
 
-```text
-iot-bigdata-project/
-├── .github/workflows/          # CI/CD pipeline definitions
-│
-├── backend/                    # Real-time telemetry ingestion service
-│   ├── app/
-│   │   ├── main.py             # Application entrypoint
-│   │   ├── db.py               # Database connection management
-│   │   ├── models/             # Pydantic data validation schemas
-│   │   ├── mqtt/               # MQTT data ingestion
-│   │   └── routes/             # REST API endpoints
-│   └── requirements.txt
-│
-├── simulator/                  # Device telemetry simulator
-│   └── simulator.py
-│
-├── spark-jobs/                 # Batch analytics pipeline
-│   ├── batch_analytics.py      # Aggregation and anomaly detection
-│   ├── export_to_parquet.py    # Database to S3 export
-│   ├── run_hourly_pipeline.sh  # Pipeline orchestrator
-│   └── run_with_worker.sh      # Ephemeral worker launcher
-│
-├── benchmarks/                 # Performance testing and comparison
-│   ├── results/                # Benchmark reports
-│   └── *.py                    # Test scripts
-│
-├── db/
-│   └── init.sql                # Database schema and hypertable setup
-│
-├── grafana/provisioning/       # Grafana as-code provisioning
-│   ├── alerting/               # Alert rules and notification policies
-│   ├── dashboards/             # Dashboard definitions
-│   └── datasources/            # Data source connections
-│
-├── infra/                      # Infrastructure and deployment
-│   ├── docker-compose.yml      # Container orchestration
-│   ├── mosquitto/              # MQTT broker configuration
-│   ├── prometheus/             # Metrics collection configuration
-│   ├── alloy/                  # Monitoring agent configuration
-│   ├── systemd/                # Service and timer definitions
-│   ├── scripts/                # Bootstrap and provisioning automation
-│   └── terraform/              # Infrastructure as Code
-│       ├── compute.tf          # EC2 instances and provisioners
-│       ├── network.tf          # VPC, subnets, and routing
-│       ├── security.tf         # Security groups and rules
-│       ├── secrets.tf          # SSM Parameter Store
-│       └── environments/       # Per-environment variable files
-│
-└── docs/                       # Technical documentation
-    ├── infrastructure.md       # AWS topology and architecture
-    ├── database.md             # Replication and failover procedures
-    ├── spark-analytics.md      # Pipeline design and benchmarks
-    ├── edge-device-integration.md  # Payload schemas and MQTT specs
-    ├── retrospective.md        # Engineering failures and fixes
-    └── adr/                    # Architecture Decision Records
-```
+**Challenge:** Terraform's `local-exec` provisioner fires immediately after `aws_instance` resource creation, but the EC2 instance's SSM agent takes 30-60 seconds to register with AWS Systems Manager. Remote commands fail with "instance not found."
+
+**Solution:** Added a polling loop that waits for SSM `PingStatus = Online` before sending remote commands.
+
+**Outcome:** Eliminated the race condition. `terraform apply` completes reliably without manual retries.
+
+**Deep-dive:** [Staging Retrospective](docs/retrospective.md)
+
+---
+
+## Future Improvements
+
+While the current architecture successfully proves the end-to-end flow of IoT telemetry, the following evolution paths are identified for operational maturity and deeper systems engineering practice:
+
+### Completed (v2.0)
+
+- **Configuration Management (Ansible):** Replaced fragile bash provisioning scripts with idempotent Ansible playbooks and roles (`timescaledb_primary`, `timescaledb_replica`, `applayer`, `alloy_agent`). Scripts are now safe to re-run on live systems.
+- **Custom AMI Pipeline (Packer):** Baked PostgreSQL 16, TimescaleDB, Java 21, Spark 3.5, Docker, and Grafana Alloy into pre-built AMIs using Packer with Ansible provisioners. Eliminated the S3 RPM relay pipeline and reduced node provisioning time from ~15 minutes to ~2 minutes.
+
+### Near-Term (Planned)
+
+- **Containerized Orchestration (Kubernetes):** Migrate Docker Compose services (FastAPI backend, Mosquitto, Grafana stack) and systemd-managed services to a lightweight Kubernetes cluster (K3s). Unifies service lifecycle management, adds application-level health probes (`livenessProbe`/`readinessProbe`), and enables rolling zero-downtime deploys.
+- **Spark on Kubernetes:** Replace the systemd timer-driven Spark pipeline with Kubernetes-native Spark Operator. Spark driver/executor pods are scheduled as K8s workloads with proper resource limits, retry policies, and execution visibility.
+- **Container CI/CD Pipeline:** Evolve the current SSH-based deployment to a container image pipeline: build Docker images in GitHub Actions, push to Amazon ECR, and deploy to K3s via `kubectl apply`.
 
 ---
 
@@ -282,49 +476,9 @@ iot-bigdata-project/
 
 ---
 
-## Project Status
+## License
 
-> *This project is under active development. Status is updated as features are verified.*
-
-| Component | Status |
-|:---|:---|
-| Real-time MQTT ingestion and closed-loop control | ✅ Verified |
-| TimescaleDB primary-standby replication | ✅ Verified |
-| Terraform IaC and zero-touch bootstrapping | ✅ Verified |
-| PySpark batch analytics (Local Mode) | ✅ Verified |
-| Grafana observability and Telegram alerting | ✅ Verified |
-| CI/CD pipeline (GitHub Actions + Tailscale) | ✅ Verified |
+This project is licensed under the [MIT License](LICENSE).
 
 ---
 
-## Future Improvements
-
-While the current architecture successfully proves the end-to-end flow of IoT telemetry, the following evolution paths are identified for operational maturity and deeper systems engineering practice:
-
-### Near-Term (Planned)
-- **Configuration Management (Ansible):** Replace fragile bash provisioning scripts (`provision-db-primary.sh`, `provision-db-replica.sh`, `setup-alloy-nodes.sh`) with idempotent Ansible playbooks. Current scripts are not safe to re-run on a live system; Ansible ensures repeatable, declarative configuration for database nodes and monitoring agents.
-- **Custom AMI Pipeline (Packer):** Bake PostgreSQL, TimescaleDB, Alloy, Java, and Spark into pre-built AMIs using Packer (driven by Ansible roles). Eliminates the S3 RPM relay pipeline (`sync-packages-to-s3.sh`) and reduces provisioning time from ~15 minutes to ~2-3 minutes. Database nodes boot ready-to-configure instead of ready-to-install.
-- **Containerized Orchestration (Kubernetes):** Migrate Docker Compose services (FastAPI backend, Mosquitto, Grafana stack) to a lightweight Kubernetes cluster (k3s). Enables rolling updates, health-check-based restarts, and a foundation for auto-scaling the backend under load.
-- **Spark on Kubernetes:** Replace the bash-based ephemeral worker launcher (`run_with_worker.sh`) with Kubernetes-native Spark Operator. Spark driver/executor pods are scheduled as native K8s workloads with proper resource limits and retry policies.
-
-### Mid-Term (Under Consideration)
-- **Workflow Orchestration (Airflow):** Replace the systemd timer-driven hourly pipeline with an Apache Airflow DAG for retry logic, dependency tracking, and execution visibility.
-- **RAG-based Sensor Query Interface:** Natural-language query layer over historical sensor data using retrieval-augmented generation. Embeds daily Parquet summaries into a vector store (pgvector on existing TimescaleDB), exposed as a `/chat` endpoint on the FastAPI backend.
-
-### Long-Term (Aspirational)
-- **Real-Time Anomaly Detection:** Evolve from hourly batch analytics to sub-second anomaly detection using Spark Structured Streaming or Apache Flink, reading directly from the MQTT broker via a Kafka bridge.
-
----
-
-## Getting Started
-
-This project involves multiple infrastructure layers (networking, database provisioning, TLS certificates, DNS configuration). There is no single "quick start" command.
-
-Refer to the documentation guides for setup instructions:
-
-| Goal | Guide |
-|:---|:---|
-| Understand the AWS topology and deploy infrastructure | [Infrastructure Guide](docs/infrastructure.md) |
-| Set up TimescaleDB, replication, and failover | [Database Runbook](docs/database.md) |
-| Run the Spark analytics pipeline | [Spark Analytics Guide](docs/spark-analytics.md) |
-| Connect edge devices or run the simulator | [Edge Integration Specs](docs/edge-device-integration.md) |
