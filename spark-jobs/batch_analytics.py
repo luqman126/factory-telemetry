@@ -121,11 +121,22 @@ def run(parquet_path: str, worker_count: int = 0):
     spark_builder = SparkSession.builder \
         .appName(f"iot_analytics_{job_id}") \
         .config("spark.hadoop.fs.s3a.impl",
-                "org.apache.hadoop.fs.s3a.S3AFileSystem") \
-        .config("spark.hadoop.fs.s3a.aws.credentials.provider",
-                "com.amazonaws.auth.InstanceProfileCredentialsProvider") \
-        .config("spark.hadoop.fs.s3a.endpoint",
-                "s3.ap-southeast-1.amazonaws.com")
+                "org.apache.hadoop.fs.s3a.S3AFileSystem") 
+         
+    # Local MinIO mode (if credentials /endpoint are set in .env)   
+    if os.getenv("AWS_ACCESS_KEY_ID") and os.getenv("AWS_SECRET_ACCESS_KEY"):
+        spark_builder = spark_builder \
+            .config("spark.hadoop.fs.s3a.endpoint", os.getenv("AWS_ENDPOINT_URL", "http://minio:9000")) \
+            .config("spark.hadoop.fs.s3a.access.key", os.getenv("AWS_ACCESS_KEY_ID")) \
+            .config("spark.hadoop.fs.s3a.secret.key", os.getenv("AWS_SECRET_ACCESS_KEY")) \
+            .config("spark.hadoop.fs.s3a.path.style.access", "true") \
+            .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
+            .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
+    else:
+        # Production AWS EC2 Mode (IAM Instance Profile)
+        spark_builder = spark_builder \
+            .config("spark.hadoop.fs.s3a.aws.credentials.provider", "com.amazonaws.auth.InstanceProfileCredentialsProvider") \
+            .config("spark.hadoop.fs.s3a.endpoint", "s3.ap-southeast-1.amazonaws.com")
 
     spark = spark_builder.getOrCreate()
     logger.info(f"Spark master: {spark.sparkContext.master}")
