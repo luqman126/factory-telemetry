@@ -37,6 +37,10 @@ ON CONFLICT (device_id) DO NOTHING;
 -- Hypertable utama. TimescaleDB akan partisi otomatis per 1 hari.
 -- Pakai DOUBLE PRECISION (eksplisit) bukan FLOAT (ambigu).
 -- Pakai CHECK constraint untuk nilai yang punya range logis.
+-- location is denormalize deliberately from devices table for these following purpose:
+-- 1. Point-in-time snapshot: if device be move to other room, the history of the data remain accurate.
+-- 2. Query performance: avoid JOIN on hypertable that has million of rows in Grafana/Spark.
+-- 3. Storage overhead will be minimum because the TimescaleDB compression use encodin dictionary.
 
 CREATE TABLE IF NOT EXISTS sensor_readings (
 
