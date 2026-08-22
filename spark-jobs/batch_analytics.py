@@ -30,9 +30,9 @@ logger = logging.getLogger(__name__)
 # Threshold anomali — sesuai DATA_CONTRACT
 # ============================================================
 THRESHOLDS = {
-    "temperature":   {"warning": 35.0,  "critical": 35.0},
+    "temperature":   {"warning": 35.0,  "critical": 40.0},
     "humidity":      {"warning": 80.0,  "critical": 90.0},
-    "vibration_rms": {"warning": 1.0,   "critical": 1.0},
+    "vibration_rms": {"warning": 1.0,   "critical": 2.0},
     "flux_ppm":      {"warning": 35.0,  "critical": 75.0},
 }
 
