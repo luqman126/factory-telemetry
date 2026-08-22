@@ -16,6 +16,18 @@ WORKDIR /spark-jobs
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download Spark dependency JARs during build (cached in Docker layer)
+# This avoid downloading ~30MB from Maven Central on every container run
+RUN python3.12 -c "\
+from pyspark.sql import SparkSession; \
+SparkSession.builder \
+    .config('spark.jars.packages', \
+            'org.apache.hadoop:hadoop-aws:3.3.4,' \
+            'com.amazonaws:aws-java-sdk-bundle:1.12.261,' \
+            'org.postgresql:postgresql:42.7.4') \
+    .getOrCreate() \
+    .stop()"
+
 # Copy job scripts
 COPY batch_analytics.py export_to_parquet.py ./
 

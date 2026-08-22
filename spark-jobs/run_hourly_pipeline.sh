@@ -57,36 +57,34 @@ fi
 
 # Jalankan export_to_parquet.py dan tangkap output S3 URI
 echo "Menjalankan export_to_parquet.py..."
-EXPORT_OUTPUT=$(python3.12 export_to_parquet.py)
-echo "$EXPORT_OUTPUT"
+python3.12 export_to_parquet.py
 
-# Ekstrak S3 URI menggunakan grep dan cut
-S3_URI=$(echo "$EXPORT_OUTPUT" | grep "S3 URI: " | cut -d' ' -f3 || true)
-
-if [ -z "$S3_URI" ] || [ "$S3_URI" = "None" ]; then
-    echo "=== [$(date)] Tidak ada data baru untuk dianalisis. Pipeline selesai dengan sukses (graceful exit). ==="
+# Read S3 URI from file (deterministic handoff)
+URI_FILE="$SCRIPT_DIR/data/last_export_uri.txt"
+if [ ! -f "$URI_FILE" ] || [ ! -s "$URI_FILE" ]; then
+    echo "=== [$(date)] No new data to analyze. Pipeline exiting cleanly. ==="
     exit 0
 fi
 
-echo "S3 URI yang terdeteksi: $S3_URI"
+S3_URI=$(cat "$URI_FILE")
+echo "S3 URI detected: $S3_URI"
 
-# Cari spark-submit binary
-SPARK_SUBMIT="spark-submit"
-if [ -x "/opt/spark/bin/spark-submit" ]; then
-    SPARK_SUBMIT="/opt/spark/bin/spark-submit"
-elif [ -n "$SPARK_HOME" ] && [ -x "$SPARK_HOME/bin/spark-submit" ]; then
-    SPARK_SUBMIT="$SPARK_HOME/bin/spark-submit"
-fi
+# S3 URI is passed to the containerized Spark job
+echo "Running batch_analytics.py inside iot-spark container..."
 
-echo "Menggunakan binary spark-submit: $SPARK_SUBMIT"
+# User infra_iot_net for local dev (compose network), or host network for EC2 VPC access
+DOCKER_NET="${DOCKER_NET:-infra_iot_net}"
 
-# Jalankan spark-submit menggunakan local[*] mode dengan batasan memori
-echo "Memicu spark-submit untuk batch_analytics.py..."
-$SPARK_SUBMIT \
-  --master "local[*]" \
-  --executor-memory 512m \
-  --driver-memory 512m \
-  --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261,org.postgresql:postgresql:42.7.4 \
-  batch_analytics.py "$S3_URI" 0
+docker run --rm \
+    --name iot_spark \
+    --network "$DOCKER_NET" \
+    --env-file "$SCRIPT_DIR/../infra/.env" \
+    iot-spark:latest \
+    spark-submit \
+    --master "local[*]" \
+    --driver-memory 512m \
+    --executor-memory 512m \
+    --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261,org.postgresql:postgresql:42.7.4 \
+    batch_analytics.py "$S3_URI" 0
 
-echo "=== [$(date)] Pipeline Batch Spark Jam-an Selesai dengan Sukses ==="
+echo "=== [$(date)] Hourly Spark Batch pipeline is complete successfully ==="

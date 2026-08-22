@@ -35,8 +35,8 @@ S3_PREFIX   = "raw"
 def get_engine():
     user     = os.getenv("POSTGRES_USER")
     password = os.getenv("POSTGRES_PASSWORD")
-    # Read dari replica untuk offload primary (export = read-only, time-tolerant)
-    # Fallback ke primary kalau replica tidak di-set
+    # Read from replica for offload primary (export = read-only, time-tolerant)
+    # Fallback to primary if the replica is not be setted up
     host     = os.getenv("POSTGRES_HOST_REPLICA") or os.getenv("POSTGRES_HOST", "localhost")
     port     = os.getenv("POSTGRES_PORT", "5432")
     dbname   = os.getenv("POSTGRES_DB")
@@ -91,17 +91,20 @@ def export(window_hours: int = WINDOW_HOURS) -> str:
         engine.dispose()
 
     if df.empty:
-        logger.warning("Tidak ada data dalam window waktu ini, export dibatalkan")
+        logger.warning("There is no data within this time window, export canceled")
+        uri_file = Path(__file__).parent / "data" / "last_export_uri.txt"
+        if uri_file.exists():
+            uri_file.unlink()  # Remove stale URI from previous run
         return None
 
     logger.info(f"Berhasil query {len(df)} baris dari DB")
 
-    # Fix timestamp supaya kompatibel dengan Spark
+    # Fix the timestamp in order to be aligned with Spark
     df["time"] = pd.to_datetime(df["time"])
     df["time"] = df["time"].dt.tz_localize(None)
     df["time"] = df["time"].astype("datetime64[us]")
 
-    # Simpan ke lokal dulu
+    # Save locally first
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     filename    = f"sensor_{from_time.strftime('%Y%m%d_%H%M%S')}_{now.strftime('%Y%m%d_%H%M%S')}.parquet"
     local_path  = OUTPUT_DIR / filename
@@ -109,16 +112,20 @@ def export(window_hours: int = WINDOW_HOURS) -> str:
     df.to_parquet(local_path, index=False, engine="pyarrow")
     logger.info(f"Parquet lokal: {local_path} ({local_path.stat().st_size / 1024:.1f} KB)")
 
-    # Upload ke S3
+    # Upload to S3
     s3_key = f"{S3_PREFIX}/{filename}"
     s3_uri = upload_to_s3(local_path, s3_key)
 
-    # Hapus file lokal setelah upload berhasil
+    # Delete the local file after uploaded successfully
     local_path.unlink()
     logger.info("File lokal dihapus setelah upload")
 
-    return s3_uri
+    # Write URI to a file for deterministic handoff to shell orchestrator
+    uri_file = Path(__file__).parent / "data" / "last_export_uri.txt"
+    uri_file.parent.mkdir(parents=True, exist_ok=True)
+    uri_file.write_text(s3_uri)
 
+    return s3_uri
 
 if __name__ == "__main__":
     uri = export()
