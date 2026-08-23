@@ -121,8 +121,9 @@ def query_results(conn):
         analytics_count = cur.fetchone()[0]
 
         cur.execute(
-            "SELECT device_id, metric_name, metric_value FROM analytics_results "
-            "WHERE device_id LIKE 'bench_spark_%%' ORDER BY device_id, metric_name"
+            "SELECT device_id, avg_temperature, max_temperature, min_temperature, "
+            "avg_humidity, avg_vibration_rms, max_vibration_rms, avg_flux_ppm, max_flux_ppm "
+            "FROM analytics_results WHERE device_id LIKE 'bench_spark_%%' ORDER BY device_id"
         )
         analytics_values = cur.fetchall()
 

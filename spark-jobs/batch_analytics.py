@@ -1,9 +1,8 @@
-# ============================================================
-# spark-jobs/batch_analytics.py
-# Spark batch job: baca Parquet, hitung analytics, simpan ke DB
-# Jalankan: spark-submit [options] batch_analytics.py <path_parquet> <worker_count>
-# Contoh:   spark-submit --master "local[*]" batch_analytics.py data/parquet/sensor_xxx.parquet 0
-# ============================================================
+"""
+Spark batch job: read Parquet from S3/MinIO, compute metrics, and persist to PostgreSQL.
+Usage: spark-submit [options] batch_analytics.py <parquet_path> [worker_count]
+Example: spark-submit --master "local[*]" batch_analytics.py s3a://bucket/raw/sensor_xxx.parquet 0
+"""
 
 import os
 import sys
@@ -27,9 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ============================================================
-# Threshold anomali — sesuai DATA_CONTRACT
-# ============================================================
+# Anomaly threshold definitions matching the Data Contract
 THRESHOLDS = {
     "temperature":   {"warning": 35.0,  "critical": 40.0},
     "humidity":      {"warning": 80.0,  "critical": 90.0},
@@ -49,17 +46,15 @@ def get_engine():
 
 def compute_zscore_anomalies(df, sensor_col, device_col="device_id"):
     """
-    Compute z-score anomalies using a rolling window per device.
-    Returns a DataFrame of anomalous readings with z-scores.
+    Compute z-score anomalies using a rolling window partitioned by device.
+    Returns a DataFrame containing anomalous readings with calculated z-scores.
     """
-    # Rolling window: all readings for this device in th current batch
-    # (since we process 1-hour windows, this is effectively a 1-hour rolling window)
     w = Window.partitionBy(device_col)
     df_stats = df.filter(F.col(sensor_col).isNotNull()) \
         .withColumn("_mean", F.avg(sensor_col).over(w)) \
         .withColumn("_stddev", F.stddev(sensor_col).over(w))
 
-    # Avoid division by zero (stddev=0 means all values are identical = no anomaly)
+    # Guard against division by zero when variance is zero
     df_z = df_stats.withColumn(
         "_zscore",
         F.when(F.col("_stddev") > 0,
@@ -67,7 +62,7 @@ def compute_zscore_anomalies(df, sensor_col, device_col="device_id"):
          .otherwise(0.0)
     )
 
-    # Flag anomalies where |z-score| > 3
+    # Flag records where absolute z-score exceeds 3 (3-sigma rule)
     return df_z.filter(F.abs(F.col("_zscore")) > 3.0) \
         .select(
             F.col("time").alias("event_time"),
@@ -75,9 +70,9 @@ def compute_zscore_anomalies(df, sensor_col, device_col="device_id"):
             F.col("location"),
             F.lit(sensor_col).alias("sensor_type"),
             F.col(sensor_col).cast("double").alias("observed_value"),
-            F.lit(0.0).alias("threshold_value"),  # Not applicable for z-score
+            F.lit(0.0).alias("threshold_value"),
             F.col("_zscore").alias("z_score"),
-            F.lit("HIGH").alias("severity"),  # Z-score anomalies are HIGH by default
+            F.lit("HIGH").alias("severity"),
         )
 
 
@@ -110,30 +105,12 @@ def save_analytics(engine, rows, job_id, window_start, window_end):
     insert_sql = text("""
         INSERT INTO analytics_results
             (computed_at, window_start, window_end,
-             device_id, location, metric_name, metric_value, job_id)
+             device_id, location, avg_temperature, max_temperature, min_temperature,
+             avg_humidity, avg_vibration_rms, max_vibration_rms, avg_flux_ppm, max_flux_ppm, job_id)
         VALUES
             (:computed_at, :window_start, :window_end,
-             :device_id, :location, :metric_name, :metric_value, :job_id)
-    """)
-    with engine.connect() as conn:
-        conn.execute(delete_sql, {"window_start": window_start, "window_end": window_end})
-        conn.execute(insert_sql, rows)
-        conn.commit()
-
-
-def save_anomalies(engine, rows, window_start, window_end):
-    # Delete previous anomalies for this window (idempotent re-run)
-    delete_sql = text("""
-        DELETE FROM anomaly_events
-        WHERE event_time >= :window_start AND event_time <= :window_end
-    """)
-    insert_sql = text("""
-        INSERT INTO anomaly_events
-            (event_time, device_id, location,
-             sensor_type, observed_value, threshold_value, severity)
-        VALUES
-            (:event_time, :device_id, :location,
-             :sensor_type, :observed_value, :threshold_value, :severity)
+             :device_id, :location, :avg_temperature, :max_temperature, :min_temperature,
+             :avg_humidity, :avg_vibration_rms, :max_vibration_rms, :avg_flux_ppm, :max_flux_ppm, :job_id)
     """)
     with engine.connect() as conn:
         conn.execute(delete_sql, {"window_start": window_start, "window_end": window_end})
@@ -149,16 +126,13 @@ def run(parquet_path: str, worker_count: int = 0):
     logger.info(f"Input    : {parquet_path}")
     logger.info(f"Workers  : {worker_count}")
 
-    # --------------------------------------------------------
-    # Init Spark — master URL ditentukan oleh spark-submit --master
-    # Kalau tidak di-set, default fallback ke local[*]
-    # --------------------------------------------------------
+    # Initialize Spark session with S3A file system implementation
     spark_builder = SparkSession.builder \
         .appName(f"iot_analytics_{job_id}") \
         .config("spark.hadoop.fs.s3a.impl",
                 "org.apache.hadoop.fs.s3a.S3AFileSystem") 
-         
-    # Local MinIO mode (if credentials /endpoint are set in .env)   
+
+    # Dynamic credentials: MinIO for local development vs IAM Instance Profile for EC2
     if os.getenv("AWS_ACCESS_KEY_ID") and os.getenv("AWS_SECRET_ACCESS_KEY"):
         spark_builder = spark_builder \
             .config("spark.hadoop.fs.s3a.endpoint", os.getenv("AWS_ENDPOINT_URL", "http://minio:9000")) \
@@ -175,35 +149,24 @@ def run(parquet_path: str, worker_count: int = 0):
 
     spark = spark_builder.getOrCreate()
     logger.info(f"Spark master: {spark.sparkContext.master}")
-
     spark.sparkContext.setLogLevel("WARN")
 
-    # --------------------------------------------------------
-    # Normalise path — Spark butuh s3a://, bukan s3://
-    # --------------------------------------------------------
+    # Normalize URI scheme for Hadoop S3A connector
     parquet_path = parquet_path.replace("s3://", "s3a://", 1)
 
-    # --------------------------------------------------------
-    # Baca Parquet + smart repartition + cache
-    # df di-cache karena dipakai untuk multiple actions:
-    # count, agg time, groupBy, anomaly detection
-    # Tanpa cache, setiap action akan re-read dari S3 → SLOW
-    # --------------------------------------------------------
+    # Read Parquet and cache to avoid multiple remote scans across actions
     df = spark.read.parquet(parquet_path)
 
-    # Smart repartition sebelum cache (banyak partisi = data per partisi kecil, mencegah OOM)
     if worker_count > 0:
         num_partitions = max(worker_count * 10, 20)
         df = df.repartition(num_partitions)
         logger.info(f"Repartitioned to {num_partitions} partitions")
 
     df = df.cache()
-    total_records = df.count()  # Trigger cache materialization
+    total_records = df.count()
     logger.info(f"Records  : {total_records}")
 
-    # --------------------------------------------------------
-    # Window waktu — gabung min+max dalam 1 agg call (1 action)
-    # --------------------------------------------------------
+    # Extract time window boundaries in a single aggregation action
     window_row = df.agg(
         F.min("time").alias("ws"),
         F.max("time").alias("we")
@@ -211,9 +174,7 @@ def run(parquet_path: str, worker_count: int = 0):
     window_start = window_row["ws"]
     window_end   = window_row["we"]
 
-    # --------------------------------------------------------
-    # Agregasi per device (small output, aman collect)
-    # --------------------------------------------------------
+    # Compute device-level metrics across the full time window
     agg_df = df.groupBy("device_id", "location").agg(
         F.avg("temperature").alias("avg_temperature"),
         F.max("temperature").alias("max_temperature"),
@@ -225,36 +186,36 @@ def run(parquet_path: str, worker_count: int = 0):
         F.max("flux_ppm").alias("max_flux_ppm"),
     )
 
-    # Konversi ke list of dict untuk disimpan ke DB
+    # Convert wide aggregates to structured rows (1 row per device)
     now = datetime.now(timezone.utc)
     analytics_rows = []
     for row in agg_df.collect():
-        for metric, value in row.asDict().items():
-            if metric in ("device_id", "location") or value is None:
-                continue
-            analytics_rows.append({
-                "computed_at":  now,
-                "window_start": window_start,
-                "window_end":   window_end,
-                "device_id":    row["device_id"],
-                "location":     row["location"],
-                "metric_name":  metric,
-                "metric_value": float(value),
-                "job_id":       job_id,
-            })
+        r = row.asDict()
+        analytics_rows.append({
+            "computed_at":        now,
+            "window_start":       window_start,
+            "window_end":         window_end,
+            "device_id":          r["device_id"],
+            "location":           r["location"],
+            "avg_temperature":    r.get("avg_temperature"),
+            "max_temperature":    r.get("max_temperature"),
+            "min_temperature":    r.get("min_temperature"),
+            "avg_humidity":       r.get("avg_humidity"),
+            "avg_vibration_rms":  r.get("avg_vibration_rms"),
+            "max_vibration_rms":  r.get("max_vibration_rms"),
+            "avg_flux_ppm":       r.get("avg_flux_ppm"),
+            "max_flux_ppm":       r.get("max_flux_ppm"),
+            "job_id":             job_id,
+        })
 
-    # --------------------------------------------------------
-    # Anomali detection — distributed write via JDBC
-    # Tidak collect ke driver — executor langsung write ke DB
-    # --------------------------------------------------------
-    
-    # Z-score based anomaly detection (statistical, complements static thresholds)
+    # Statistical z-score anomaly detection across numeric sensors
     anomaly_dfs = []
     zscore_sensors = ["temperature", "humidity", "vibration_rms", "flux_ppm"]
     for sensor in zscore_sensors:
         z_df = compute_zscore_anomalies(df, sensor)
         anomaly_dfs.append(z_df) 
 
+    # Static threshold anomaly detection
     for sensor, thres in THRESHOLDS.items():
         anomaly_df = df.filter(
             F.col(sensor).isNotNull() & (F.col(sensor) >= thres["warning"])
@@ -271,7 +232,7 @@ def run(parquet_path: str, worker_count: int = 0):
         )
         anomaly_dfs.append(anomaly_df)
 
-    # Check voc_level string anomalies (GOOD vs HAZARDOUS)
+    # String status anomaly detection for gas hazards
     voc_anomaly_df = df.filter(
         F.col("voc_level").isNotNull() & (F.col("voc_level") == "HAZARDOUS")
     ).select(
@@ -286,21 +247,18 @@ def run(parquet_path: str, worker_count: int = 0):
     )
     anomaly_dfs.append(voc_anomaly_df)
 
-    # Union all sensor anomalies
+    # Combine all anomaly DataFrames by column name
     anomaly_combined = anomaly_dfs[0]
     for adf in anomaly_dfs[1:]:
         anomaly_combined = anomaly_combined.unionByName(adf)
 
-    # Coalesce ke jumlah partition kecil untuk JDBC write
-    # Terlalu banyak partition = terlalu banyak DB connection paralel
+    # Coalesce to 2 partitions to prevent exhausting database connections
     anomaly_combined = anomaly_combined.coalesce(2)
 
-    # --------------------------------------------------------
-    # Simpan ke DB
-    # --------------------------------------------------------
+    # Persist analytics and anomalies to Database
     engine = get_engine()
 
-    # JDBC connection params untuk distributed write
+    # JDBC connection params for distributed write
     jdbc_url = f"jdbc:postgresql://{os.getenv('POSTGRES_HOST')}:{os.getenv('POSTGRES_PORT', '5432')}/{os.getenv('POSTGRES_DB')}"
     jdbc_props = {
         "user": os.getenv("POSTGRES_USER"),
@@ -310,9 +268,9 @@ def run(parquet_path: str, worker_count: int = 0):
 
     try:
         save_analytics(engine, analytics_rows, job_id, window_start, window_end)
-        logger.info(f"Analytics tersimpan: {len(analytics_rows)} metric")
+        logger.info(f"Analytics saved: {len(analytics_rows)} device metrics")
 
-        # Delete existing anomalies in window (idempotent re-run)
+        # Clear existing anomalies for this window to maintain idempotency
         with engine.connect() as conn:
             conn.execute(text("""
                 DELETE FROM anomaly_events
@@ -320,13 +278,12 @@ def run(parquet_path: str, worker_count: int = 0):
             """), {"ws": window_start, "we": window_end})
             conn.commit()
 
-        # Distributed write — executor langsung tulis ke DB paralel
-        # Tidak ada count() dulu — write langsung, kalau kosong = no-op
+        # Distributed write: executors stream directly to the database in parallel
         anomaly_combined.write \
             .mode("append") \
             .option("batchsize", 5000) \
             .jdbc(url=jdbc_url, table="anomaly_events", properties=jdbc_props)
-        logger.info("Anomali tersimpan via distributed JDBC write")
+        logger.info("Anomalies saved via distributed JDBC write")
 
         finished_at        = datetime.now(timezone.utc)
         execution_time_sec = (finished_at - started_at).total_seconds()
@@ -335,7 +292,7 @@ def run(parquet_path: str, worker_count: int = 0):
             engine, job_id, started_at, finished_at,
             worker_count, total_records, execution_time_sec, "SUCCESS"
         )
-        logger.info(f"Selesai dalam {execution_time_sec:.2f} detik")
+        logger.info(f"Completed in {execution_time_sec:.2f} seconds")
 
     except Exception as e:
         finished_at        = datetime.now(timezone.utc)
@@ -344,16 +301,17 @@ def run(parquet_path: str, worker_count: int = 0):
             engine, job_id, started_at, finished_at,
             worker_count, total_records, execution_time_sec, "FAILED"
         )
-        logger.error(f"Job gagal: {e}")
+        logger.error(f"Job failed: {e}")
         raise
     finally:
         engine.dispose()
         spark.stop()
 
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: spark-submit batch_analytics.py <parquet_path> [worker_count]")
-        print("Contoh: spark-submit batch_analytics.py data/parquet/sensor_xxx.parquet 0")
+        print("Example: spark-submit batch_analytics.py s3a://bucket/raw/sensor_xxx.parquet 0")
         sys.exit(1)
 
     parquet_path = sys.argv[1]
