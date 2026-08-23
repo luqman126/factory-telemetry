@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 
@@ -44,6 +45,40 @@ def get_engine():
     port     = os.getenv("POSTGRES_PORT", "5432")
     dbname   = os.getenv("POSTGRES_DB")
     return create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}")
+
+
+def compute_zscore_anomalies(df, sensor_col, device_col="device_id"):
+    """
+    Compute z-score anomalies using a rolling window per device.
+    Returns a DataFrame of anomalous readings with z-scores.
+    """
+    # Rolling window: all readings for this device in th current batch
+    # (since we process 1-hour windows, this is effectively a 1-hour rolling window)
+    w = Window.partitionBy(device_col)
+    df_stats = df.filter(F.col(sensor_col).isNotNull()) \
+        .withColumn("_mean", F.avg(sensor_col).over(w)) \
+        .withColumn("_stddev", F.stddev(sensor_col).over(w))
+
+    # Avoid division by zero (stddev=0 means all values are identical = no anomaly)
+    df_z = df_stats.withColumn(
+        "_zscore",
+        F.when(F.col("_stddev") > 0,
+               (F.col(sensor_col) - F.col("_mean")) / F.col("_stddev"))
+         .otherwise(0.0)
+    )
+
+    # Flag anomalies where |z-score| > 3
+    return df_z.filter(F.abs(F.col("_zscore")) > 3.0) \
+        .select(
+            F.col("time").alias("event_time"),
+            F.col("device_id"),
+            F.col("location"),
+            F.lit(sensor_col).alias("sensor_type"),
+            F.col(sensor_col).cast("double").alias("observed_value"),
+            F.lit(0.0).alias("threshold_value"),  # Not applicable for z-score
+            F.col("_zscore").alias("z_score"),
+            F.lit("HIGH").alias("severity"),  # Z-score anomalies are HIGH by default
+        )
 
 
 def save_job_log(engine, job_id, started_at, finished_at, worker_count,
@@ -212,7 +247,14 @@ def run(parquet_path: str, worker_count: int = 0):
     # Anomali detection — distributed write via JDBC
     # Tidak collect ke driver — executor langsung write ke DB
     # --------------------------------------------------------
+    
+    # Z-score based anomaly detection (statistical, complements static thresholds)
     anomaly_dfs = []
+    zscore_sensors = ["temperature", "humidity", "vibration_rms", "flux_ppm"]
+    for sensor in zscore_sensors:
+        z_df = compute_zscore_anomalies(df, sensor)
+        anomaly_dfs.append(z_df) 
+
     for sensor, thres in THRESHOLDS.items():
         anomaly_df = df.filter(
             F.col(sensor).isNotNull() & (F.col(sensor) >= thres["warning"])
@@ -221,6 +263,7 @@ def run(parquet_path: str, worker_count: int = 0):
             F.col("device_id"),
             F.col("location"),
             F.lit(sensor).alias("sensor_type"),
+            F.lit(None).cast("double").alias("z_score"),
             F.col(sensor).cast("double").alias("observed_value"),
             F.lit(thres["warning"]).alias("threshold_value"),
             F.when(F.col(sensor) >= thres["critical"], "CRITICAL")
@@ -236,6 +279,7 @@ def run(parquet_path: str, worker_count: int = 0):
         F.col("device_id"),
         F.col("location"),
         F.lit("voc_level").alias("sensor_type"),
+        F.lit(None).cast("double").alias("z_score"),
         F.lit(1.0).alias("observed_value"),
         F.lit(0.0).alias("threshold_value"),
         F.lit("CRITICAL").alias("severity"),
