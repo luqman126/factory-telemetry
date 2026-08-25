@@ -46,6 +46,7 @@ jobs:
             --exclude 'simulator/.venv/' \
             --exclude 'spark-jobs/.venv/' \
             --exclude '*/__pycache__/' \
+            --exclude 'infra/docker-compose.override.yml' \
             ./ ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }}:/home/ec2-user/iot-bigdata-project/
 
       - name: Copy Temporary Deploy Key to Bastion
@@ -69,41 +70,18 @@ jobs:
             echo "-> Fetching environment secrets from AWS SSM..."
             chmod +x infra/scripts/fetch-secrets.sh
             ./infra/scripts/fetch-secrets.sh staging
+            source infra/.env
 
-            # 1. Inisialisasi python virtual environment jika belum ada
-            if [ ! -d "backend/.venv" ]; then
-              echo "-> Installing Python 3.12 and creating virtual environment for backend..."
-              sudo dnf install -y python3.12
-              python3.12 -m venv backend/.venv
+            # 0b. Run Database Migrations
+            echo "-> Applying database migrations..."
+            if [ -d "db/migrations" ]; then
+              for migration in db/migrations/*.sql; do
+                echo "Executing $migration on primary database..."
+                PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "$migration" || true
+              done
             fi
 
-            if [ ! -d "spark-jobs/.venv" ]; then
-              echo "-> Creating virtual environment for spark-jobs..."
-              python3.12 -m venv spark-jobs/.venv
-            fi
-
-            # 2. Update Python dependencies (with custom TMPDIR to avoid tmpfs space limits)
-            echo "-> Setting up custom TMPDIR for pip installs..."
-            mkdir -p /home/ec2-user/tmp
-            export TMPDIR=/home/ec2-user/tmp
-
-            echo "-> Updating backend dependencies..."
-            /home/ec2-user/iot-bigdata-project/backend/.venv/bin/pip install --upgrade pip
-            /home/ec2-user/iot-bigdata-project/backend/.venv/bin/pip install -r backend/requirements.txt
-
-            echo "-> Updating spark-jobs dependencies..."
-            /home/ec2-user/iot-bigdata-project/spark-jobs/.venv/bin/pip install --upgrade pip
-            /home/ec2-user/iot-bigdata-project/spark-jobs/.venv/bin/pip install -r spark-jobs/requirements.txt
-
-            # 3. Setup & Restart systemd service iot-backend
-            echo "-> Setting up systemd iot-backend service..."
-            sudo cp /home/ec2-user/iot-bigdata-project/infra/systemd/iot-backend.service /etc/systemd/system/
-            sudo systemctl daemon-reload
-            sudo systemctl enable iot-backend
-            echo "-> Restarting systemd iot-backend service..."
-            sudo systemctl restart iot-backend
-
-            # 3b. Setup & Enable systemd service & timer untuk Spark Analytics
+            # 1. Setup & Enable systemd service & timer untuk Spark Analytics
             echo "-> Setting up systemd iot-analytics service and timer..."
             sudo chmod +x /home/ec2-user/iot-bigdata-project/spark-jobs/run_hourly_pipeline.sh
             sudo cp /home/ec2-user/iot-bigdata-project/infra/systemd/iot-analytics.service /etc/systemd/system/
@@ -111,7 +89,7 @@ jobs:
             sudo systemctl daemon-reload
             sudo systemctl enable --now iot-analytics.timer
 
-            # 4. Restart Docker Compose services (Mosquitto, Grafana, Prometheus)
+            # 2. Restart Docker Compose services (Mosquitto, Grafana, Prometheus)
             echo "-> Restarting Docker Compose containers..."
             cd /home/ec2-user/iot-bigdata-project/infra
 
@@ -149,16 +127,20 @@ jobs:
               sudo chmod +x /usr/libexec/docker/cli-plugins/docker-compose
             fi
 
-            # 4b. Deploy MQTT SSL Certificates
+            # 3. Deploy MQTT SSL Certificates
             echo "-> Deploying MQTT SSL certificates..."
             chmod +x scripts/deploy-mqtt-cert.sh
             sudo ./scripts/deploy-mqtt-cert.sh "staging-mqtt.chescloud.my.id"
 
-            docker compose up -d --build
+            docker compose -f docker-compose.yml up -d --build
+
+            # 4. Build the Spark image
+            cd /home/ec2-user/iot-bigdata-project/spark-jobs
+            docker build -t iot-spark:latest .
 
             # 5. Cek Status Service
             echo "-> Checking backend status..."
-            sudo systemctl status iot-backend --no-pager -l
+            docker logs iot_backend --tail 20
 
             echo "-> Checking spark-analytics timer status..."
             sudo systemctl status iot-analytics.timer --no-pager -l
