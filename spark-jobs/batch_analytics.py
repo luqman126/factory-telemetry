@@ -34,16 +34,6 @@ THRESHOLDS = {
     "flux_ppm":      {"warning": 35.0,  "critical": 75.0},
 }
 
-
-def get_engine():
-    user     = os.getenv("POSTGRES_USER")
-    password = os.getenv("POSTGRES_PASSWORD")
-    host     = os.getenv("POSTGRES_HOST", "localhost")
-    port     = os.getenv("POSTGRES_PORT", "5432")
-    dbname   = os.getenv("POSTGRES_DB")
-    return create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}")
-
-
 def compute_zscore_anomalies(df, sensor_col, device_col="device_id"):
     """
     Compute z-score anomalies using a rolling window partitioned by device.
@@ -255,17 +245,23 @@ def run(parquet_path: str, worker_count: int = 0):
     # Coalesce to 2 partitions to prevent exhausting database connections
     anomaly_combined = anomaly_combined.coalesce(2)
 
-    # Persist analytics and anomalies to Database
-    engine = get_engine()
+    user     = (os.getenv("POSTGRES_USER") or "").strip('"\'')
+    password = (os.getenv("POSTGRES_PASSWORD") or "").strip('"\'')
+    host     = (os.getenv("POSTGRES_HOST", "localhost") or "").strip('"\'')
+    port     = (os.getenv("POSTGRES_PORT", "5432") or "").strip('"\'')
+    dbname   = (os.getenv("POSTGRES_DB") or "").strip('"\'')
 
     # JDBC connection params for distributed write
-    jdbc_url = f"jdbc:postgresql://{os.getenv('POSTGRES_HOST')}:{os.getenv('POSTGRES_PORT', '5432')}/{os.getenv('POSTGRES_DB')}"
+    jdbc_url = f"jdbc:postgresql://{host}:{port}/{dbname}"
     jdbc_props = {
-        "user": os.getenv("POSTGRES_USER"),
-        "password": os.getenv("POSTGRES_PASSWORD"),
+        "user": user,
+        "password": password,
         "driver": "org.postgresql.Driver",
     }
 
+    # Persist analytics and anomalies to Database
+    engine = create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}")
+    
     try:
         save_analytics(engine, analytics_rows, job_id, window_start, window_end)
         logger.info(f"Analytics saved: {len(analytics_rows)} device metrics")

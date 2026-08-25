@@ -44,7 +44,7 @@ try:
         key = name.split("/")[-1]
         # Escape quotes jika ada di dalam value
         val_escaped = val.replace("\"", "\\\"")
-        print(f"{key}=\"{val_escaped}\"")
+        print(f"{key}={val_escaped}")
 except Exception as e:
     print(f"Error parsing SSM json: {e}", file=sys.stderr)
     sys.exit(1)

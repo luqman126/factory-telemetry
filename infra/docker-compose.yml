@@ -26,8 +26,6 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: iot_grafana
-    depends_on:
-      - timescaledb
     restart: unless-stopped
     environment:
       # Grafana user for admin role
@@ -85,7 +83,6 @@ services:
     container_name: iot_backend
     depends_on:
       - mosquitto
-      - timescaledb
     restart: unless-stopped
     environment:
       # Database

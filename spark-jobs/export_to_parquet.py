@@ -33,13 +33,11 @@ S3_PREFIX   = "raw"
 
 
 def get_engine():
-    user     = os.getenv("POSTGRES_USER")
-    password = os.getenv("POSTGRES_PASSWORD")
-    # Read from replica for offload primary (export = read-only, time-tolerant)
-    # Fallback to primary if the replica is not be setted up
-    host     = os.getenv("POSTGRES_HOST_REPLICA") or os.getenv("POSTGRES_HOST", "localhost")
-    port     = os.getenv("POSTGRES_PORT", "5432")
-    dbname   = os.getenv("POSTGRES_DB")
+    user     = (os.getenv("POSTGRES_USER") or "").strip('"\'')
+    password = (os.getenv("POSTGRES_PASSWORD") or "").strip('"\'')
+    host     = (os.getenv("POSTGRES_HOST_REPLICA") or "").strip('"\'') or (os.getenv("POSTGRES_HOST", "localhost") or "").strip('"\'')
+    port     = (os.getenv("POSTGRES_PORT", "5432") or "").strip('"\'')
+    dbname   = (os.getenv("POSTGRES_DB") or "").strip('"\'')
     logger.info(f"Reading from DB: {host}:{port}")
     return create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}")
 
