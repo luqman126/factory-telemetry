@@ -1,4 +1,11 @@
-FROM python:3.12-slim
+# === Migration Stage ===
+FROM python:3.12-slim AS migrations
+
+RUN python3 -c 'import urllib.request; urllib.request.urlretrieve("https://github.com/amacneil/dbmate/releases/download/v2.17.0/dbmate-linux-amd64", "/usr/local/bin/dbmate")' \
+    && chmod +x /usr/local/bin/dbmate
+
+# === Runtime Stage ===
+FROM python:3.12-slim AS runtime
 
 # Security run as non-root
 RUN groupadd -r appuser && useradd -r -g appuser appuser

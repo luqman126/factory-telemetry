@@ -66,19 +66,31 @@ jobs:
             echo "=== MENJALANKAN POST-DEPLOYMENT SETUP ==="
             cd /home/ec2-user/iot-bigdata-project
 
-            # 0. Fetch Secrets dari SSM Parameter Store ke .env
+            # 0a. Fetch Secrets dari SSM Parameter Store ke .env
             echo "-> Fetching environment secrets from AWS SSM..."
             chmod +x infra/scripts/fetch-secrets.sh
             ./infra/scripts/fetch-secrets.sh staging
             source infra/.env
 
-            # 0b. Run Database Migrations
+            # 0b. Clean up the iot-backend.service 
+            sudo systemctl stop iot-backend.service || true
+            sudo systemctl disable iot-backend.service || true
+            sudo rm -f /etc/systemd/system/iot-backend.service
+            sudo systemctl daemon-reload
+
+            # 0c. Run Database Migrations
             echo "-> Applying database migrations..."
             if [ -d "db/migrations" ]; then
-              for migration in db/migrations/*.sql; do
-                echo "Executing $migration on primary database..."
-                PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "$migration" || true
-              done
+              docker build --target migrations -t iot-migrations:latest ./backend
+
+              docker run --rm \
+              --name iot_migrations \
+              --network infra_iot_net \
+              --env-file infra/.env \
+              -v "$PWD/db/migrations:/migrations:ro" \
+              -v "$PWD/db/run_migrations.sh:/run_migrations.sh:ro" \
+              iot-migrations:latest \
+              /bin/sh /run_migrations.sh
             fi
 
             # 1. Setup & Enable systemd service & timer untuk Spark Analytics

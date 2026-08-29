@@ -113,16 +113,8 @@ CREATE TABLE IF NOT EXISTS analytics_results (
     window_end          TIMESTAMPTZ         NOT NULL,
     device_id           VARCHAR(64)         NOT NULL,
     location            VARCHAR(128),
-
-    -- Aggregated metrics (on row per device per window)
-    avg_temperature     DOUBLE PRECISION,
-    max_temperature     DOUBLE PRECISION,
-    min_temperature     DOUBLE PRECISION,
-    avg_humidity        DOUBLE PRECISION,
-    avg_vibration_rms   DOUBLE PRECISION,
-    max_vibration_rms   DOUBLE PRECISION,
-    avg_flux_ppm        DOUBLE PRECISION,
-    max_flux_ppm        DOUBLE PRECISION,
+    metric_name         VARCHAR(64)         NOT NULL,
+    metric_value        DOUBLE PRECISION,
 
     -- Referensi ke spark_job_log untuk tahu job mana yang menghasilkan baris ini
     -- (join ke spark_job_log untuk dapat worker_count, execution_time_sec, dll)
