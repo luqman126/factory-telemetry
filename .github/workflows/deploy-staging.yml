@@ -38,13 +38,15 @@ jobs:
 
           # 3. Kirim file menggunakan rsync (abaikan folder git & terraform)
           echo "-> Pushing code to staging server..."
-          rsync -avz -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa" \
+          rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa" \
             --exclude '.git/' \
             --exclude '.github/' \
+            --exclude 'infra/.env' \
             --exclude 'infra/terraform/' \
             --exclude 'backend/.venv/' \
             --exclude 'simulator/.venv/' \
             --exclude 'spark-jobs/.venv/' \
+            --exclude 'spark-jobs/data/' \
             --exclude '*/__pycache__/' \
             --exclude 'infra/docker-compose.override.yml' \
             ./ ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }}:/home/ec2-user/iot-bigdata-project/
