@@ -18,7 +18,7 @@ variable "aws_region" {
 
 variable "source_ami" {
     type        = string
-    default     = "ami-05b741ae2ab9f1742" 
+    default     = "ami-095f155a67469a548" 
     description = "Base Amazon Linux 2023 AMI ID"
 }
 

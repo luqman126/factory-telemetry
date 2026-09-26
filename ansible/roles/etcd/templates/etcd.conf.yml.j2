@@ -1,0 +1,17 @@
+# /etc/etcd/etcd.conf.yml
+name: 'applayer-etcd'
+data-dir: '{{ etcd_data_dir }}'
+
+# Client Communication (Patroni & etcdctl)
+listen-client-urls: '{{ etcd_listen_client_urls }}'
+advertise-client-urls: '{{ etcd_advertise_client_urls }}'
+
+# Peer Communication (Single-node cluster loopback)
+listen-peer-urls: 'http://127.0.0.1:{{ etcd_peer_port }}'
+initial-advertise-peer-urls: 'http://127.0.0.1:{{ etcd_peer_port }}'
+initial-cluster: 'applayer-etcd=http://127.0.0.1:{{ etcd_peer_port }}'
+initial-cluster-token: 'etcd-cluster-iot'
+initial-cluster-state: 'new'
+
+# Compaction: Prevent disk bloat by auto-compacting old revision history hourly
+auto-compaction-retention: '1'

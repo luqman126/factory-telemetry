@@ -1,0 +1,54 @@
+scope: {{ patroni_scope }}
+namespace: {{ patroni_namespace }}
+name: {{ inventory_hostname }}
+
+restapi:
+  listen: {{ ansible_default_ipv4.address }}:{{ patroni_restapi_port }}
+  connect_address: {{ ansible_default_ipv4.address }}:{{ patroni_restapi_port }}
+
+etcd3:
+  hosts: {{ etcd_host }}:{{ etcd_port }}
+
+bootstrap:
+  dcs:
+    ttl: {{ patroni_ttl }}
+    loop_wait: {{ patroni_loop_wait }}
+    retry_timeout: {{ patroni_retry_timeout }}
+    maximum_lag_on_failover: {{ patroni_maximum_lag_on_failover }}
+    postgresql:
+      use_pg_rewind: true
+      parameters:
+        shared_preload_libraries: 'timescaledb'
+        wal_level: replica
+        hot_standby: "on"
+        max_wal_senders: 5
+        max_replication_slots: 5
+        wal_keep_size: 256MB
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+  pg_hba:
+    - host replication replicator 127.0.0.1/32 scram-sha-256
+    - host replication replicator 10.1.2.0/24 scram-sha-256
+    - host all all 10.1.0.0/16 scram-sha-256
+    - host all all 127.0.0.1/32 scram-sha-256
+
+postgresql:
+  listen: 0.0.0.0:{{ patroni_pg_port }}
+  connect_address: {{ ansible_default_ipv4.address }}:{{ patroni_pg_port }}
+  data_dir: {{ pg_data_dir }}
+  bin_dir: {{ pg_bin_dir }}
+  pgpass: /var/lib/pgsql/.pgpass
+  authentication:
+    replication:
+      username: replicator
+      password: "{{ db_password | mandatory('db_password must be supplied via SSM / extra-vars') }}"
+    superuser:
+      username: postgres
+      password: "{{ db_password | mandatory('db_password must be supplied via SSM / extra-vars') }}"
+
+tags:
+  nofailover: false
+  noloadbalance: false
+  clonefrom: false
+  nosync: false

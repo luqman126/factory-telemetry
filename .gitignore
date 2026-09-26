@@ -36,3 +36,5 @@ infra/terraform/*.secrets.tfvars
 infra/terraform/environments/*.secrets.tfvars
 infra/terraform/.terraform/
 infra/terraform/terraform.tfstate*
+*.plan
+infra/terraform/*.plan

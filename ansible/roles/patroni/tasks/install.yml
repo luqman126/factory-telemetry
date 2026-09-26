@@ -1,0 +1,39 @@
+---
+- name: Bootstrap pip offline on datalayer
+  ansible.builtin.command: python3 -m ensurepip --default-pip
+  args:
+    creates: /usr/local/bin/pip3
+
+- name: Download Patroni wheels on applayer-1
+  ansible.builtin.command: >
+    python3 -m pip download 'patroni[etcd3]' psycopg2-binary -d /tmp/patroni-wheels
+  delegate_to: applayer-1
+  run_once: true
+  args:
+    creates: /tmp/patroni-wheels/patroni-*.whl
+
+- name: Upload wheels from applayer-1 to S3
+  ansible.builtin.command: >
+    aws s3 sync /tmp/patroni-wheels s3://{{ s3_bucket }}/packages/patroni-wheels/ --region {{ aws_region | default('ap-southeast-1') }}
+  delegate_to: applayer-1
+  run_once: true
+
+- name: Download wheels from S3 to datalayer
+  ansible.builtin.command: >
+    aws s3 sync s3://{{ s3_bucket }}/packages/patroni-wheels/ /tmp/patroni-wheels/ --region {{ aws_region | default('ap-southeast-1') }}
+  args:
+    creates: /tmp/patroni-wheels/patroni-*.whl
+
+- name: Install Patroni from local wheels (Offline)
+  ansible.builtin.command: >
+    pip3 install --no-index --find-links=/tmp/patroni-wheels patroni[etcd3] psycopg2-binary
+  args:
+    creates: /usr/local/bin/patroni
+
+- name: Create /etc/patroni directory
+  ansible.builtin.file:
+    path: /etc/patroni
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0750'

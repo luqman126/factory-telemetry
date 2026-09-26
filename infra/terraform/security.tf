@@ -100,6 +100,16 @@ resource "aws_security_group_rule" "applayer_from_worker_spark" {
   source_security_group_id = aws_security_group.worker.id
 }
 
+resource "aws_security_group_rule" "applayer_from_datalayer_etcd" {
+  type                     = "ingress"
+  description              = "etcd DCS client request from datalayer"
+  from_port                = 2379
+  to_port                  = 2379
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.applayer.id
+  source_security_group_id = aws_security_group.datalayer.id
+}
+
 # ---- Rules untuk Datalayer SG ----
 resource "aws_security_group_rule" "datalayer_from_applayer_postgres" {
   type                     = "ingress"
@@ -140,6 +150,27 @@ resource "aws_security_group_rule" "datalayer_self_postgres" {
   security_group_id        = aws_security_group.datalayer.id
   source_security_group_id = aws_security_group.datalayer.id
 }
+
+resource "aws_security_group_rule" "datalayer_from_applayer_patroni" {
+  type                     = "ingress"
+  description              = "Patroni REST API / HAProxy Health checks"
+  from_port                = 8008
+  to_port                  = 8008
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.datalayer.id
+  source_security_group_id = aws_security_group.applayer.id
+}
+
+resource "aws_security_group_rule" "datalayer_self_patroni" {
+  type                     = "ingress"
+  description              = "Patroni REST API inter-node communication"
+  from_port                = 8008
+  to_port                  = 8008
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.datalayer.id
+  source_security_group_id = aws_security_group.datalayer.id
+}
+
 
 # ---- Rules untuk Worker SG ----
 resource "aws_security_group_rule" "worker_from_applayer" {

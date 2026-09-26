@@ -1,0 +1,33 @@
+---
+- name: Deploy Patroni configuration file
+  ansible.builtin.template:
+    src: patroni.yml.j2
+    dest: /etc/patroni/patroni.yml
+    owner: postgres
+    group: postgres
+    mode: '0600'
+
+- name: Deploy Patroni systemd service file
+  ansible.builtin.template:
+    src: patroni.service.j2
+    dest: /etc/systemd/system/patroni.service
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Stop and disable native PostgreSQL service
+  ansible.builtin.systemd:
+    name: postgresql
+    state: stopped
+    enabled: false
+  ignore_errors: true
+
+- name: Ensure Patroni service is started and enabled
+  ansible.builtin.systemd:
+    name: patroni
+    state: started
+    enabled: true

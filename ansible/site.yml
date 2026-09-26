@@ -1,4 +1,14 @@
 ---
+# 1. Start etcd DCS on applayer FIRST so Patroni has a DCS cluster to connect to
+- name: Provision Distributed Consensus (etcd)
+  hosts: app_nodes
+  become: true
+  roles:
+    - role: etcd
+      tags: etcd
+
+
+# 2. Provision Primary Database Node
 - name: Provision Primary Database Node
   hosts: db_primary
   become: true
@@ -8,7 +18,10 @@
   roles:
     - timescaledb_primary
     - alloy_agent
+    - role: patroni
+      tags: patroni
 
+# 3. Provision Standby Replica (Patroni auto-bootstraps replication from leader)
 - name: Provision Standby Replica Database Node
   hosts: db_replica
   become: true
@@ -16,9 +29,12 @@
     alloy_enable_postgres: true
     alloy_instance_name: "datalayer-2"
   roles:
-    - timescaledb_replica
+    # timescaledb_replica is NOT needed — Patroni handles replication automatically
     - alloy_agent
+    - role: patroni
+      tags: patroni
 
+# 4. Provision Application & Monitoring Node
 - name: Provision Application & Monitoring Node
   hosts: app_nodes
   become: true
@@ -27,5 +43,10 @@
     alloy_instance_name: "applayer-1"
     prometheus_ip: "127.0.0.1"
   roles:
-    - applayer
-    - alloy_agent
+    - role: haproxy
+      tags: haproxy
+    - role: applayer
+      tags: applayer
+    - role: alloy_agent
+      tags: alloy_agent
+

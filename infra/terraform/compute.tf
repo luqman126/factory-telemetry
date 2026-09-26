@@ -118,6 +118,7 @@ resource "aws_instance" "applayer" {
   instance_type               = var.applayer_instance_type
   subnet_id                   = aws_subnet.public.id
   key_name                    = var.key_pair_name
+  private_ip                  = cidrhost(var.public_subnet_cidr, 10) # 10.1.1.10
   iam_instance_profile        = aws_iam_instance_profile.applayer.name
   user_data_replace_on_change = true
 

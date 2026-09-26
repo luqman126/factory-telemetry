@@ -20,7 +20,7 @@ provider "aws" {
 
 # 1. S3 Bucket for Terraform State
 resource "aws_s3_bucket" "terraform_state" {
-  bucket        = "iot-bigdata-terraform-state"
+  bucket        = "iot-bigdata-tfstate-staging-apse1-944551807382"
   lifecycle {
     prevent_destroy = true
   }

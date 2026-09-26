@@ -14,7 +14,7 @@ terraform {
   }
 
   backend "s3" {
-    bucket          = "iot-bigdata-terraform-state"
+    bucket          = "iot-bigdata-tfstate-staging-apse1-944551807382"
     key             = "staging/terraform.tfstate"
     region          = "ap-southeast-1"
     use_lockfile    = true

@@ -42,6 +42,14 @@
     name: python3-psycopg2
     state: present
 
+- name: Set password for postgres superuser (required by Patroni)
+  community.postgresql.postgresql_user:
+    name: postgres
+    password: "{{ db_password }}"
+    state: present
+  become: true
+  become_user: postgres  
+
 - name: Create application database user
   community.postgresql.postgresql_user:
     name: "{{ db_user }}"

@@ -4,11 +4,11 @@
 # ============================================================
 
 resource "aws_s3_bucket" "datalake" {
-  bucket        = "${var.project_name}-datalake-${var.environment}"
+  bucket        = "${var.project_name}-datalake-${var.environment}-apse1-944551807382"
   force_destroy = true # Mengizinkan bucket dihapus beserta isinya saat 'terraform destroy'
 
   tags = {
-    Name = "${var.project_name}-datalake-${var.environment}"
+    Name = "${var.project_name}-datalake-${var.environment}-apse1-944551807382"
   }
 }
 
