@@ -1,7 +1,7 @@
 # ============================================================
 # spark-jobs/export_to_parquet.py
-# Export data sensor dari TimescaleDB ke S3 (via Parquet lokal)
-# Dijalankan sebelum batch_analytics.py
+# Export sensor data from TimescaleDB to S3 (via local Parquet)
+# Executed prior to batch_analytics.py
 # ============================================================
 
 import os
@@ -24,7 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# Konfigurasi
+# Configuration
 # ============================================================
 OUTPUT_DIR  = Path(__file__).parent / "data" / "parquet"
 WINDOW_HOURS = 1
@@ -44,22 +44,22 @@ def get_engine():
 
 def upload_to_s3(local_path: Path, s3_key: str) -> str:
     """
-    Upload file lokal ke S3.
-    Pakai IAM Role — tidak perlu credentials eksplisit.
-    Kembalikan S3 URI lengkap.
+    Upload local file to S3.
+    Uses IAM Role - no explicit credentials required.
+    Returns full S3 URI.
     """
     s3 = boto3.client("s3", region_name="ap-southeast-1")
     s3.upload_file(str(local_path), S3_BUCKET, s3_key)
     s3_uri = f"s3://{S3_BUCKET}/{s3_key}"
-    logger.info(f"Upload ke S3: {s3_uri}")
+    logger.info(f"Uploaded to S3: {s3_uri}")
     return s3_uri
 
 
 def export(window_hours: int = WINDOW_HOURS) -> str:
     """
-    Query sensor_readings, simpan ke Parquet lokal,
-    upload ke S3, hapus file lokal.
-    Kembalikan S3 URI file yang diupload.
+    Query sensor_readings, persist to temporary local Parquet,
+    upload to S3, and delete local file.
+    Returns uploaded S3 URI.
     """
     now       = datetime.now(timezone.utc)
     from_time = now - timedelta(hours=window_hours)
@@ -95,7 +95,7 @@ def export(window_hours: int = WINDOW_HOURS) -> str:
             uri_file.unlink()  # Remove stale URI from previous run
         return None
 
-    logger.info(f"Berhasil query {len(df)} baris dari DB")
+    logger.info(f"Successfully queried {len(df)} rows from DB")
 
     # Fix the timestamp in order to be aligned with Spark
     df["time"] = pd.to_datetime(df["time"])
@@ -108,7 +108,7 @@ def export(window_hours: int = WINDOW_HOURS) -> str:
     local_path  = OUTPUT_DIR / filename
 
     df.to_parquet(local_path, index=False, engine="pyarrow")
-    logger.info(f"Parquet lokal: {local_path} ({local_path.stat().st_size / 1024:.1f} KB)")
+    logger.info(f"Local Parquet: {local_path} ({local_path.stat().st_size / 1024:.1f} KB)")
 
     # Upload to S3
     s3_key = f"{S3_PREFIX}/{filename}"
@@ -116,7 +116,7 @@ def export(window_hours: int = WINDOW_HOURS) -> str:
 
     # Delete the local file after uploaded successfully
     local_path.unlink()
-    logger.info("File lokal dihapus setelah upload")
+    logger.info("Local file cleaned up after upload")
 
     # Write URI to a file for deterministic handoff to shell orchestrator
     uri_file = Path(__file__).parent / "data" / "last_export_uri.txt"

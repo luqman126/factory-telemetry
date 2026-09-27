@@ -28,15 +28,15 @@ jobs:
 
       - name: Deploy Code via Rsync
         run: |
-          # 1. Siapkan SSH key di Runner
+          # 1. Prepare SSH key on Runner
           mkdir -p ~/.ssh
           echo "${{ secrets.PRODUCTION_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
-          # 2. Buat folder tujuan di server jika belum ada & pastikan kepemilikan oleh ec2-user
+          # 2. Create destination folder on server if not present & ensure ownership by ec2-user
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.PRODUCTION_USER }}@${{ secrets.PRODUCTION_HOST }} "mkdir -p /home/ec2-user/iot-bigdata-project && sudo chown -R ec2-user:ec2-user /home/ec2-user/iot-bigdata-project"
 
-          # 3. Kirim file menggunakan rsync (abaikan folder git & terraform)
+          # 3. Synchronize repository files using rsync (exclude git, terraform, environments)
           echo "-> Pushing code to production server..."
           rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa" \
             --exclude '.git/' \
@@ -65,16 +65,16 @@ jobs:
           key: ${{ secrets.PRODUCTION_SSH_KEY }}
           port: 22
           script: |
-            echo "=== MENJALANKAN POST-DEPLOYMENT SETUP ==="
+            echo "=== EXECUTING POST-DEPLOYMENT SETUP ==="
             cd /home/ec2-user/iot-bigdata-project
 
-            # 0a. Fetch Secrets dari SSM Parameter Store ke .env
+            # 0a. Fetch Secrets from SSM Parameter Store into .env
             echo "-> Fetching environment secrets from AWS SSM..."
             chmod +x infra/scripts/fetch-secrets.sh
             ./infra/scripts/fetch-secrets.sh production
             source infra/.env
 
-            # 0b. Clean up the iot-backend.service 
+            # 0b. Clean up legacy iot-backend.service if present
             sudo systemctl stop iot-backend.service || true
             sudo systemctl disable iot-backend.service || true
             sudo rm -f /etc/systemd/system/iot-backend.service
@@ -84,6 +84,7 @@ jobs:
             echo "-> Applying database migrations..."
             if [ -d "db/migrations" ]; then
               docker build --target migrations -t iot-migrations:latest ./backend
+              docker network create infra_iot_net 2>/dev/null || true
 
               docker run --rm \
               --name iot_migrations \
@@ -95,7 +96,7 @@ jobs:
               /bin/sh /run_migrations.sh
             fi
 
-            # 1. Setup & Enable systemd service & timer untuk Spark Analytics
+            # 1. Setup & Enable systemd service & timer for Spark Analytics
             echo "-> Setting up systemd iot-analytics service and timer..."
             sudo chmod +x /home/ec2-user/iot-bigdata-project/spark-jobs/run_hourly_pipeline.sh
             sudo cp /home/ec2-user/iot-bigdata-project/infra/systemd/iot-analytics.service /etc/systemd/system/
@@ -103,7 +104,7 @@ jobs:
             sudo systemctl daemon-reload
             sudo systemctl enable --now iot-analytics.timer
 
-            # 2. Restart Docker Compose services (Mosquitto, Grafana, Prometheus)
+            # 2. Restart Docker Compose services (Mosquitto, Grafana, Prometheus, Backend)
             echo "-> Restarting Docker Compose containers..."
             cd /home/ec2-user/iot-bigdata-project/infra
 
@@ -152,7 +153,7 @@ jobs:
             cd /home/ec2-user/iot-bigdata-project/spark-jobs
             docker build -t iot-spark:latest .
 
-            # 5. Cek Status Service
+            # 5. Check Service Status
             echo "-> Checking backend status..."
             docker logs iot_backend --tail 20
 
@@ -160,7 +161,7 @@ jobs:
             sudo systemctl status iot-analytics.timer --no-pager -l
             sudo systemctl list-timers --all | grep iot-analytics || true
 
-            echo "=== DEPLOYMENT PRODUCTION SELESAI ==="
+            echo "=== PRODUCTION DEPLOYMENT COMPLETED ==="
 
       - name: Clean Up Temporary Deploy Key from Bastion
         if: always()

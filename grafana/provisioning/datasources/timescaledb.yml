@@ -1,21 +1,21 @@
 # ============================================================
 # grafana/provisioning/datasources/timescaledb.yml
-# Konfigurasi datasource Grafana ke TimescaleDB
-# Otomatis di-load saat Grafana container start
+# Grafana datasource configuration for TimescaleDB
+# Automatically provisioned on container startup
 #
 # Strategy:
 # - TimescaleDB (primary)  → write workload + alert rules
 # - TimescaleDB-Replica    → dashboard read query (default)
 #
-# Alert rules tetap reference primary UID (P40AE60E18F02DE32) untuk
-# memastikan evaluasi alert membaca data terbaru tanpa replication lag.
+# Alert rules continue referencing primary UID (P40AE60E18F02DE32) to
+# guarantee alert evaluation evaluates real-time data with zero replication lag.
 # ============================================================
 
 apiVersion: 1
 
 datasources:
   # ----------------------------------------------------------
-  # PRIMARY (datalayer-1) — write target + alert evaluation
+  # PRIMARY (datalayer-1 via HAProxy:5000) — write target + alert evaluation
   # ----------------------------------------------------------
   - name: TimescaleDB
     uid: P40AE60E18F02DE32
@@ -36,7 +36,7 @@ datasources:
     editable: false
 
   # ----------------------------------------------------------
-  # REPLICA (datalayer-2) — read-only, untuk dashboard panel
+  # REPLICA (datalayer-2 via HAProxy:5001) — read-only for dashboard panels
   # ----------------------------------------------------------
   - name: TimescaleDB-Replica
     uid: timescaledb-replica

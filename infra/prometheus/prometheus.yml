@@ -4,34 +4,34 @@
 # ============================================================
 
 global:
-  scrape_interval:     15s # Waktu scrape interval default
-  evaluation_interval: 15s # Waktu evaluasi rules default
+  scrape_interval:     15s # Default scrape interval
+  evaluation_interval: 15s # Default evaluation interval
 
-# Alertmanager configuration (opsional untuk masa depan)
+# Alertmanager configuration (optional for future expansion)
 alerting:
   alertmanagers:
     - static_configs:
         - targets: []
 
-# Load rules (opsional untuk alert rules)
+# Rule files (optional for alert rules)
 rule_files:
   # - "alert.rules_yml"
 
 scrape_configs:
   # ----------------------------------------------------------
   # 1. Prometheus Server self-monitoring (PULL Model)
-  #    Hanya memantau server Prometheus sendiri
+  #    Monitors Prometheus server metrics
   # ----------------------------------------------------------
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
 
-  # CATATAN ARSITEKTUR:
-  # Metrik host Unix (CPU, RAM, Disk) dan mesin database Postgres
-  # dari datalayer-1 dan datalayer-2 tidak ditarik (PULL) dari sini, 
-  # melainkan dikirimkan secara aktif (PUSH) oleh Grafana Alloy 
-  # melalui endpoint remote write receiver di port 9090.
+  # ARCHITECTURAL NOTE:
+  # Host system metrics (CPU, RAM, Disk) and Postgres database metrics
+  # from datalayer-1 and datalayer-2 are not scraped (PULL) directly from here.
+  # Instead, they are actively forwarded (PUSH) by Grafana Alloy
+  # via the Prometheus remote write receiver endpoint on port 9090.
   #
-  # Dengan demikian, kita tidak perlu membuka port masuk (inbound)
-  # 12345 pada Security Group database AWS Anda. Ini jauh lebih aman.
+  # Consequently, inbound monitoring ports do not need to be exposed
+  # on the database AWS Security Groups, maintaining strict network isolation.
 

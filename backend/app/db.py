@@ -1,6 +1,6 @@
 # ============================================================
 # app/db.py
-# Koneksi ke PostgreSQL / TimescaleDB
+# PostgreSQL / TimescaleDB Connection Management
 # ============================================================
 
 import os
@@ -12,26 +12,25 @@ from psycopg2.pool import SimpleConnectionPool
 from psycopg2.extras import execute_batch
 from dotenv import load_dotenv
 
-# Tunjuk eksplisit ke infra/.env
+# Explicitly point to infra/.env
 # __file__ = backend/app/db.py
-# .parents[2] = backend/
-# lalu naik satu lagi ke root project, masuk ke infra/
+# .parents[2] = project root, then navigate into infra/
 _ENV_PATH = Path(__file__).parents[2] / "infra" / ".env"
 load_dotenv(dotenv_path=_ENV_PATH)
 
 # ============================================================
 # Connection Pool
-# POOL dimulai sebagai None, baru diinisialisasi saat
-# init_pool() dipanggil dari main.py pada saat startup.
-# Ini supaya koneksi tidak dibuat saat module di-import.
+# POOL starts as None, initialized when init_pool()
+# is called from main.py during application startup.
+# This prevents connections from opening on module import.
 # ============================================================
 POOL: SimpleConnectionPool | None = None
 
 
 def init_pool() -> None:
     """
-    Inisialisasi connection pool.
-    Dipanggil sekali dari main.py saat aplikasi startup.
+    Initialize database connection pool.
+    Called once from main.py during application startup.
     """
     global POOL
     POOL = SimpleConnectionPool(
@@ -47,8 +46,8 @@ def init_pool() -> None:
 
 def close_pool() -> None:
     """
-    Tutup semua koneksi di pool.
-    Dipanggil dari main.py saat aplikasi shutdown.
+    Close all connections in the pool.
+    Called from main.py during application shutdown.
     """
     if POOL:
         POOL.closeall()
@@ -73,7 +72,7 @@ _INSERT_SQL = """
 
 
 # ============================================================
-# Single insert — dipakai MQTT consumer (satu pesan = satu row)
+# Single insert — used by MQTT consumer (one message = one row)
 # ============================================================
 def insert_one(payload: Dict[str, Any]) -> None:
     conn = POOL.getconn()

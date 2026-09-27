@@ -1,6 +1,6 @@
 # ============================================================
 # app/main.py
-# Entry point FastAPI — menyatukan semua komponen
+# FastAPI Entry Point — unifying all application components
 # ============================================================
 
 import logging
@@ -33,19 +33,19 @@ logger = logging.getLogger(__name__)
 
 # ============================================================
 # Lifespan — startup & shutdown
-# Ini cara FastAPI modern untuk menggantikan @app.on_event
+# Modern FastAPI lifecycle handler replacing deprecated @app.on_event
 # ============================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- Startup ---
     logger.info("Backend starting...")
     init_pool()
-    logger.info("Connection pool siap")
+    logger.info("Connection pool initialized")
     mqtt_client = start_mqtt_consumer()
     app.state.mqtt_client = mqtt_client
-    logger.info("MQTT consumer aktif")
+    logger.info("MQTT consumer active")
 
-    yield  # aplikasi berjalan di sini
+    yield  # application runs here
 
     # --- Shutdown ---
     logger.info("Backend shutting down...")
@@ -53,11 +53,11 @@ async def lifespan(app: FastAPI):
     app.state.mqtt_client.loop_stop()
     app.state.mqtt_client.disconnect()
     close_pool()
-    logger.info("Koneksi ditutup")
+    logger.info("Connections closed successfully")
 
 
 # ============================================================
-# Aplikasi
+# Application
 # ============================================================
 app = FastAPI(
     title="IoT Manufacturing Monitor — Backend",

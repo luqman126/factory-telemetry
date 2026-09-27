@@ -5,21 +5,21 @@
 // ============================================================
 
 // ------------------------------------------------------------
-// 1. INTEGRASI EXPORTER (Pengumpul Data)
+// 1. EXPORTER INTEGRATIONS (Data Collectors)
 // ------------------------------------------------------------
 
-// Integrasi untuk mengumpulkan metrik sistem Host (CPU, RAM, Disk, Network)
+// Integration to collect host system metrics (CPU, RAM, Disk, Network)
 prometheus.exporter.unix "node_metrics" {
-  // Gunakan konfigurasi default
+  // Use default configuration
 }
 
 #POSTGRES_EXPORTER_BLOCK#
 
 // ------------------------------------------------------------
-// 2. SCRAPE JOBS (Proses Penarikan Data Exporter & Naming Instance)
+// 2. SCRAPE JOBS (Exporter Scraping & Instance Label Relabeling)
 // ------------------------------------------------------------
 
-// Komponen relabel untuk penamaan instance agar tidak menggunakan default localhost
+// Relabel component for explicit instance naming instead of default localhost
 prometheus.relabel "rename_instance" {
   forward_to = [prometheus.remote_write.prometheus_server.receiver]
   rule {
@@ -29,7 +29,7 @@ prometheus.relabel "rename_instance" {
   }
 }
 
-// Menarik data metrik sistem host
+// Scrape host system metrics
 prometheus.scrape "scrape_node" {
   targets    = prometheus.exporter.unix.node_metrics.targets
   forward_to = [prometheus.relabel.rename_instance.receiver]
@@ -38,7 +38,7 @@ prometheus.scrape "scrape_node" {
 #POSTGRES_SCRAPE_BLOCK#
 
 // ------------------------------------------------------------
-// 3. REMOTE WRITE (Pengiriman Terpusat ke Prometheus di applayer-1)
+// 3. REMOTE WRITE (Centralized forwarder to Prometheus on applayer-1)
 // ------------------------------------------------------------
 prometheus.remote_write "prometheus_server" {
   endpoint {

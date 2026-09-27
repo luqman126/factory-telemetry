@@ -3,8 +3,8 @@
 # Compute Layer — EC2 Instances, Elastic IP, and IAM Roles
 # ============================================================
 
-# ---- 1. IAM Role & Instance Profile untuk Applayer (dan Worker) ----
-# Role ini memungkinkan applayer-1 mengakses S3 dan mendeploy ephemeral workers.
+# ---- 1. IAM Role & Instance Profile for Applayer (and Worker) ----
+# This role grants applayer-1 access to S3 and permissions to deploy ephemeral workers.
 resource "aws_iam_role" "applayer" {
   name = "${var.project_name}-${var.environment}-s3-role"
 
@@ -24,7 +24,7 @@ resource "aws_iam_role" "applayer" {
   }
 }
 
-# Instance Profile untuk dipasang pada EC2 Instance
+# Instance Profile for EC2 Instance association
 resource "aws_iam_instance_profile" "applayer" {
   name = "${var.project_name}-${var.environment}-s3-profile"
   role = aws_iam_role.applayer.name
@@ -35,7 +35,7 @@ resource "aws_iam_role_policy_attachment" "applayer_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-# Single Custom Inline Policy - Menerapkan "Principle of Least Privilege"
+# Single Custom Inline Policy - Implements Principle of Least Privilege
 resource "aws_iam_role_policy" "least_privilege" {
   name = "${var.project_name}-${var.environment}-least-privilege-policy"
   role = aws_iam_role.applayer.id
@@ -43,7 +43,7 @@ resource "aws_iam_role_policy" "least_privilege" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      # 1. ORKESTRASI EC2: Hanya izinkan action yang dibutuhkan oleh run_with_worker.sh
+      # 1. EC2 ORCHESTRATION: Only grant actions required by run_with_worker.sh
       {
         Effect = "Allow"
         Action = [
@@ -54,14 +54,14 @@ resource "aws_iam_role_policy" "least_privilege" {
         ]
         Resource = "*"
       },
-      # 2. PASS ROLE: Hanya izinkan me-pass role ini saja ke worker node baru
+      # 2. PASS ROLE: Only allow passing this exact role to new worker nodes
       {
         Effect   = "Allow"
         Action   = "iam:PassRole"
         Resource = aws_iam_role.applayer.arn
       },
-      # 3. S3 DATA LAKE: Hanya izinkan akses ke bucket milik project ini (staging/prod)
-      # Memblokir akses ke bucket lain di luar project untuk keamanan
+      # 3. S3 DATA LAKE: Only allow access to the project's S3 datalake buckets
+      # Blocks access to external buckets for perimeter isolation
       {
         Effect = "Allow"
         Action = [
@@ -79,7 +79,7 @@ resource "aws_iam_role_policy" "least_privilege" {
         ]
         Resource = "arn:aws:s3:::${var.project_name}-datalake-*/*"
       },
-      # 4. SECRETS MANAGEMENT: Hanya izinkan membaca secrets untuk environment ini dari SSM
+      # 4. SECRETS MANAGEMENT: Only allow reading secrets for this environment from SSM
       {
         Effect = "Allow"
         Action = [
@@ -89,7 +89,7 @@ resource "aws_iam_role_policy" "least_privilege" {
         ]
         Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/${var.project_name}/${var.environment}/*"
       },
-      # 5. KMS DECRYPT: Diperlukan untuk mendekripsi SSM SecureString parameters
+      # 5. KMS DECRYPT: Required to decrypt SSM SecureString parameters
       {
         Effect   = "Allow"
         Action   = "kms:Decrypt"
@@ -112,7 +112,7 @@ locals {
   mqtt_subdomain = var.environment == "production" ? "mqtt.${var.domain_name}" : "${var.environment}-mqtt.${var.domain_name}"
 }
 
-# Ditempatkan di Public Subnet agar bisa diakses oleh client / IoT Device
+# Placed in Public Subnet to accept inbound traffic from clients / IoT devices
 resource "aws_instance" "applayer" {
   ami                         = var.applayer_ami_id
   instance_type               = var.applayer_instance_type
@@ -165,8 +165,8 @@ EOF
   }
 }
 
-# Elastic IP (EIP) untuk Applayer-1
-# Menjaga agar IP publik tetap statis saat server reboot / maintenance
+# Elastic IP (EIP) for Applayer-1
+# Preserves static public IPv4 address across reboots and maintenance
 resource "aws_eip" "applayer" {
   instance = aws_instance.applayer.id
   domain   = "vpc"
@@ -177,13 +177,13 @@ resource "aws_eip" "applayer" {
 }
 
 # ---- 3. EC2 Instance: Datalayer-1 (PostgreSQL DB Primary) ----
-# Ditempatkan di Private Subnet, menggunakan static IP untuk kemudahan replikasi
+# Deployed in Private Subnet with static IP for predictable clustering
 resource "aws_instance" "datalayer_primary" {
   ami                         = var.datalayer_ami_id
   instance_type               = var.datalayer_instance_type
   subnet_id                   = aws_subnet.private.id
   key_name                    = var.key_pair_name
-  private_ip                  = cidrhost(var.private_subnet_cidr, 10) # Contoh: 10.1.2.10
+  private_ip                  = cidrhost(var.private_subnet_cidr, 10) # e.g. 10.1.2.10
   iam_instance_profile        = aws_iam_instance_profile.applayer.name
   user_data_replace_on_change = true
 
@@ -212,13 +212,13 @@ EOF
 }
 
 # ---- 4. EC2 Instance: Datalayer-2 (PostgreSQL DB Replica) ----
-# Ditempatkan di Private Subnet, menggunakan static IP
+# Deployed in Private Subnet with static IP
 resource "aws_instance" "datalayer_replica" {
   ami                         = var.datalayer_ami_id
   instance_type               = var.datalayer_instance_type
   subnet_id                   = aws_subnet.private.id
   key_name                    = var.key_pair_name
-  private_ip                  = cidrhost(var.private_subnet_cidr, 20) # Contoh: 10.1.2.20
+  private_ip                  = cidrhost(var.private_subnet_cidr, 20) # e.g. 10.1.2.20
   iam_instance_profile        = aws_iam_instance_profile.applayer.name
   user_data_replace_on_change = true
 

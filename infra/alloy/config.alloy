@@ -4,45 +4,45 @@
 // ============================================================
 
 // ------------------------------------------------------------
-// 1. INTEGRASI EXPORTER (Pengumpul Data)
+// 1. EXPORTER INTEGRATIONS (Data Collectors)
 // ------------------------------------------------------------
 
-// Integrasi untuk mengumpulkan metrik sistem Host (CPU, RAM, Disk, Network)
+// Integration to collect host system metrics (CPU, RAM, Disk, Network)
 prometheus.exporter.unix "node_metrics" {
-  // Gunakan konfigurasi default
+  // Use default configuration
 }
 
-// Integrasi Exporter Postgres pada database nodes (datalayer-1 / datalayer-2)
-// AKTIFKAN HANYA DI SERVER DATABASE (Hapus tanda komentar //)
+// Postgres Exporter integration on database nodes (datalayer-1 / datalayer-2)
+// ENABLE ONLY ON DATABASE SERVERS (Uncomment lines below)
 //
 // prometheus.exporter.postgres "postgres_metrics" {
-//   # Sesuaikan host (localhost), port (5432), dan nama database (staging_iot_db atau iot_db)
+//   # Configure host (localhost), port (5432), and database name (staging_iot_db or iot_db)
 //   data_source_names = ["postgresql://kagebyo:kagebyo126x@localhost:5432/staging_iot_db?sslmode=disable"]
 // }
 
 
 // ------------------------------------------------------------
-// 2. SCRAPE JOBS (Proses Penarikan Data Exporter & Naming Instance)
+// 2. SCRAPE JOBS (Exporter Scraping & Instance Label Relabeling)
 // ------------------------------------------------------------
 
-// Komponen relabel untuk penamaan instance agar tidak menggunakan default localhost
+// Relabel component for explicit instance naming instead of default localhost
 prometheus.relabel "rename_instance" {
   forward_to = [prometheus.remote_write.prometheus_server.receiver]
   rule {
     action       = "replace"
     target_label = "instance"
-    // GANTI SESUAI NAMA HOST: "applayer-1", "datalayer-1", atau "datalayer-2"
+    // SET MATCHING HOST NAME: "applayer-1", "datalayer-1", or "datalayer-2"
     replacement  = "applayer-1"
   }
 }
 
-// Menarik data metrik sistem host
+// Scrape host system metrics
 prometheus.scrape "scrape_node" {
   targets    = prometheus.exporter.unix.node_metrics.targets
   forward_to = [prometheus.relabel.rename_instance.receiver]
 }
 
-// Menarik data metrik database Postgres (Aktifkan hanya di server database)
+// Scrape Postgres database metrics (Enable only on database nodes)
 //
 // prometheus.scrape "scrape_postgres" {
 //   targets    = prometheus.exporter.postgres.postgres_metrics.targets
@@ -51,11 +51,11 @@ prometheus.scrape "scrape_node" {
 
 
 // ------------------------------------------------------------
-// 3. REMOTE WRITE (Pengiriman Terpusat ke Prometheus di applayer-1)
+// 3. REMOTE WRITE (Centralized forwarder to Prometheus on applayer-1)
 // ------------------------------------------------------------
 prometheus.remote_write "prometheus_server" {
   endpoint {
-    // Alamat IP Private applayer-1 server Prometheus (sesuaikan dengan environment)
+    // Private IP address of applayer-1 Prometheus server (match target environment)
     // Staging: http://10.1.1.208:9090/api/v1/write
     // Production: http://10.0.1.127:9090/api/v1/write
     url = "http://10.1.1.208:9090/api/v1/write"

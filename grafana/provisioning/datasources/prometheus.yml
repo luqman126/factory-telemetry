@@ -1,7 +1,7 @@
 # ============================================================
 # grafana/provisioning/datasources/prometheus.yml
-# Konfigurasi datasource Grafana ke Prometheus Server
-# Otomatis di-load saat Grafana container start
+# Grafana datasource configuration for Prometheus Server
+# Automatically provisioned on container startup
 # ============================================================
 
 apiVersion: 1
@@ -11,7 +11,7 @@ datasources:
     uid: prometheus-ds
     type: prometheus
     access: proxy
-    url: http://prometheus:9090  # Koneksi internal Docker bridge (iot_net)
+    url: http://prometheus:9090  # Internal Docker bridge network connection (iot_net)
     jsonData:
       httpMethod: POST
     isDefault: false
