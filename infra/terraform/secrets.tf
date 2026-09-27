@@ -30,22 +30,29 @@ resource "aws_ssm_parameter" "postgres_password" {
 resource "aws_ssm_parameter" "postgres_host" {
   name        = "/${var.project_name}/${var.environment}/POSTGRES_HOST"
   type        = "String"
-  value       = aws_instance.datalayer_primary.private_ip
-  description = "Database primary private IP address"
+  value       = aws_instance.applayer.private_ip # 10.1.1.10 (HAProxy Primary)
+  description = "Database primary private IP address via HAProxy"
 }
 
 resource "aws_ssm_parameter" "postgres_port" {
   name        = "/${var.project_name}/${var.environment}/POSTGRES_PORT"
   type        = "String"
-  value       = "5432"
-  description = "Database connection port"
+  value       = "5000"
+  description = "Database connection port (HAProxy Primary RW)"
 }
 
 resource "aws_ssm_parameter" "postgres_host_replica" {
   name        = "/${var.project_name}/${var.environment}/POSTGRES_HOST_REPLICA"
   type        = "String"
-  value       = aws_instance.datalayer_replica.private_ip
-  description = "Database replica private IP address"
+  value       = aws_instance.applayer.private_ip # 10.1.1.10 (HAProxy Replica)
+  description = "Database replica private IP address via HAProxy"
+}
+
+resource "aws_ssm_parameter" "postgres_port_replica" {
+  name        = "/${var.project_name}/${var.environment}/POSTGRES_PORT_REPLICA"
+  type        = "String"
+  value       = "5001"
+  description = "Database replica connection port (HAProxy Replica RO)"
 }
 
 # ---- MQTT Config ----

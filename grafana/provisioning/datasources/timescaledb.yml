@@ -41,7 +41,7 @@ datasources:
   - name: TimescaleDB-Replica
     uid: timescaledb-replica
     type: postgres
-    url: ${POSTGRES_HOST_REPLICA}:${POSTGRES_PORT}
+    url: ${POSTGRES_HOST_REPLICA}:${POSTGRES_PORT_REPLICA}
     user: ${POSTGRES_USER}
     secureJsonData:
       password: ${POSTGRES_PASSWORD}
