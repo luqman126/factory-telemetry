@@ -129,3 +129,12 @@ This document captures the key engineering failures, debugging processes, and au
 - **Cause:** Terraform 1.10+ introduced native S3 object lock files (`use_lockfile = true`) as a built-in replacement for external DynamoDB locking tables.
 - **Solution:** Created standalone `infra/terraform-bootstrap/` module to provision `iot-bigdata-terraform-state` S3 bucket with versioning and `prevent_destroy`. Migrated main infrastructure state via `terraform init -migrate-state` and configured native `use_lockfile = true` in `infra/terraform/main.tf`, eliminating DynamoDB table overhead and deprecation warnings completely.
 
+### Issue: TimescaleDB Symlink Idempotency & Shell Module Vulnerabilities
+- **Symptom:** Re-running the `timescaledb_primary` Ansible playbook on the database replica caused catastrophic failures, corrupting database node roles and disconnecting the replica.
+- **Cause:** The Ansible playbook originally used the raw `shell` module to perform naive `find` and `ln -sf` operations for TimescaleDB library symlinking. Running these commands repeatedly altered permissions indiscriminately, breaking Patroni replication and idempotency principles.
+- **Solution:** Refactored the Ansible roles `timescaledb_primary` and `timescaledb_replica` to replace raw shell commands with native `ansible.builtin.find` and `ansible.builtin.file` modules. This ensures declarative, idempotent execution where symlinks are only created if missing, and state remains unchanged on subsequent runs, restoring replica connectivity and stability.
+
+### Issue: Inconsistent Database Schema State & Migration Management
+- **Symptom:** Changes to the wide-column analytics schema were not systematically tracked or applied, risking schema drift between environments and missing `schema_migrations` history.
+- **Cause:** Schema updates were initially applied ad-hoc via `init.sql` instead of a standardized migration tool, making it difficult to understand the database schema history.
+- **Solution:** Adopted `dbmate` inside a one-shot CI/CD Docker container via `run_migrations.sh`. Migrations are now strictly tracked using the 14-digit timestamp naming convention (e.g., `20260829000000_wide_column_analytics.sql`), ensuring a complete, reproducible history in the database's `schema_migrations` table without requiring a persistent daemon on the cluster.

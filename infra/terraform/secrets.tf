@@ -117,7 +117,7 @@ resource "aws_ssm_parameter" "aws_region" {
 resource "aws_ssm_parameter" "s3_bucket" {
   name        = "/${var.project_name}/${var.environment}/S3_BUCKET"
   type        = "String"
-  value       = "${var.project_name}-datalake-${var.environment}"
+  value       = aws_s3_bucket.datalake.id
   description = "AWS S3 data lake bucket name"
 }
 

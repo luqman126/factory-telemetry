@@ -1,7 +1,7 @@
 FROM python:3.12-slim-bookworm
 
 # Security run as non-root 
-RUN groupadd -r sparkuser && useradd -r -g sparkuser -m -d /home/sparkuser sparkuser
+RUN groupadd -g 1000 sparkuser && useradd -u 1000 -g sparkuser -m -d /home/sparkuser sparkuser
 
 # Install openJDK 17 for PySpark
 RUN apt-get update && apt-get install -y --no-install-recommends \
