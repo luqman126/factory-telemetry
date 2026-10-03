@@ -21,6 +21,11 @@ This document captures the key engineering failures, debugging processes, and au
 - **Cause:** Rebuilding the `applayer-1` instance generated a new Tailscale interface IP (`<tailscale-new-ip>`), while the Cloudflare DNS record for `<staging-mqtt-domain>` was still pointing to the cached IP of the destroyed instance (`<tailscale-old-ip>`).
 - **Solution:** Updated the Cloudflare DNS record to map to the new Tailscale IP, restoring internal VPN routing.
 
+### Issue: EC2 User-Data Execution Gap on SSM Parameter Update
+- **Symptom:** After updating an expired `tailscale_auth_key` in `staging.secrets.tfvars` and executing `deploy-environment.sh`, the `applayer-1` node failed to connect to the Tailscale network, causing the Ansible inventory discovery to fail.
+- **Cause:** EC2 `user_data` scripts only run on initial instance launch. Updating an AWS SSM Parameter Store value via Terraform updates the parameter in AWS in-place, but does not alter the EC2 instance resource definition. Terraform therefore did not trigger instance replacement, and the running instance never re-executed its boot registration script with the new key.
+- **Solution:** Marked the instance for replacement using `terraform taint aws_instance.applayer` and re-ran `deploy-environment.sh`. This forced Terraform to recreate the instance, properly executing `user_data` on boot with the updated auth key.
+
 ### Issue: Ephemeral Worker Launch Failure (ec2:CreateTags Policy Gap)
 - **Symptom:** Launching the Spark ephemeral worker via `run_with_worker.sh` crashed with an `UnauthorizedOperation` error stating `is not authorized to perform: ec2:CreateTags on resource: arn:aws:ec2:ap-southeast-1:...:instance/*`.
 - **Cause:** The script launches worker instances with `--tag-specifications` to set the worker's Name tag during creation. In AWS, assigning tags during instance creation requires the `ec2:CreateTags` permission. Our strict IAM role policy `least_privilege` was missing this action.
