@@ -1,6 +1,7 @@
 [Unit]
 Description=Patroni High-Availability PostgreSQL Orchestration
-After=syslog.target network.target
+After=syslog.target network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -10,7 +11,8 @@ ExecStart=/usr/local/bin/patroni /etc/patroni/patroni.yml
 ExecReload=/bin/kill -s HUP $MAINPID
 KillMode=process
 TimeoutSec=30
-Restart=no
+Restart=on-failure
+RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
