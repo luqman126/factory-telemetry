@@ -84,11 +84,10 @@ jobs:
             echo "-> Applying database migrations..."
             if [ -d "db/migrations" ]; then
               docker build --target migrations -t iot-migrations:latest ./backend
-              docker network create infra_iot_net 2>/dev/null || true
 
               docker run --rm \
               --name iot_migrations \
-              --network infra_iot_net \
+              --network host \
               --env-file infra/.env \
               -v "$PWD/db/migrations:/migrations:ro" \
               -v "$PWD/db/run_migrations.sh:/run_migrations.sh:ro" \
