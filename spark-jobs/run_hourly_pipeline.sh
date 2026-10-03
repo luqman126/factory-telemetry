@@ -9,6 +9,9 @@ echo "=== [$(date)] Starting Hourly Spark Batch Pipeline ==="
 # User infra_iot_net for local dev, or host/bridge for EC2 VPC access
 DOCKER_NET="${DOCKER_NET:-infra_iot_net}"
 
+# Ensure data directory exists with current user's permissions before Docker creates it as root
+mkdir -p "$SCRIPT_DIR/data"
+
 # 1. Run export_to_parquet.py inside the container with volume mount
 echo "Running export_to_parquet.py..."
 docker run --rm \
