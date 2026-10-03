@@ -34,7 +34,7 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
 
           # 2. Create destination folder on server if not present & ensure ownership by ec2-user
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} "mkdir -p /home/ec2-user/iot-bigdata-project && sudo chown -R ec2-user:ec2-user /home/ec2-user/iot-bigdata-project"
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} "mkdir -p /home/ec2-user/factory-telemetry && sudo chown -R ec2-user:ec2-user /home/ec2-user/factory-telemetry"
 
           # 3. Synchronize repository files using rsync (exclude git, terraform, environments)
           echo "-> Pushing code to staging server..."
@@ -49,7 +49,7 @@ jobs:
             --exclude 'spark-jobs/data/' \
             --exclude '*/__pycache__/' \
             --exclude 'infra/docker-compose.override.yml' \
-            ./ ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }}:/home/ec2-user/iot-bigdata-project/
+            ./ ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }}:/home/ec2-user/factory-telemetry/
 
       - name: Copy Temporary Deploy Key to Bastion
         run: |
@@ -66,7 +66,7 @@ jobs:
           port: 22
           script: |
             echo "=== EXECUTING POST-DEPLOYMENT SETUP ==="
-            cd /home/ec2-user/iot-bigdata-project
+            cd /home/ec2-user/factory-telemetry
 
             # 0a. Fetch Secrets from SSM Parameter Store into .env
             echo "-> Fetching environment secrets from AWS SSM..."
@@ -97,15 +97,15 @@ jobs:
 
             # 1. Setup & Enable systemd service & timer for Spark Analytics
             echo "-> Setting up systemd iot-analytics service and timer..."
-            sudo chmod +x /home/ec2-user/iot-bigdata-project/spark-jobs/run_hourly_pipeline.sh
-            sudo cp /home/ec2-user/iot-bigdata-project/infra/systemd/iot-analytics.service /etc/systemd/system/
-            sudo cp /home/ec2-user/iot-bigdata-project/infra/systemd/iot-analytics.timer /etc/systemd/system/
+            sudo chmod +x /home/ec2-user/factory-telemetry/spark-jobs/run_hourly_pipeline.sh
+            sudo cp /home/ec2-user/factory-telemetry/infra/systemd/iot-analytics.service /etc/systemd/system/
+            sudo cp /home/ec2-user/factory-telemetry/infra/systemd/iot-analytics.timer /etc/systemd/system/
             sudo systemctl daemon-reload
             sudo systemctl enable --now iot-analytics.timer
 
             # 2. Restart Docker Compose services (Mosquitto, Grafana, Prometheus, Backend)
             echo "-> Restarting Docker Compose containers..."
-            cd /home/ec2-user/iot-bigdata-project/infra
+            cd /home/ec2-user/factory-telemetry/infra
 
             if [ -d "mosquitto/passwd" ]; then
               echo "-> Removing incorrect directory mosquitto/passwd..."
@@ -149,7 +149,7 @@ jobs:
             docker compose -f docker-compose.yml up -d --build
 
             # 4. Build the Spark image
-            cd /home/ec2-user/iot-bigdata-project/spark-jobs
+            cd /home/ec2-user/factory-telemetry/spark-jobs
             docker build -t iot-spark:latest .
 
             # 5. Check Service Status

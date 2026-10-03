@@ -1,6 +1,6 @@
 - name: Set default project directory if not defined
   ansible.builtin.set_fact:
-    app_project_dir: "{{ app_project_dir | default(ansible_user_dir ~ '/iot-bigdata-project') }}"
+    app_project_dir: "{{ app_project_dir | default(ansible_user_dir ~ '/factory-telemetry') }}"
 
 - name: Ensure /etc/letsencrypt directory exists
   ansible.builtin.file:

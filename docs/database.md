@@ -183,7 +183,7 @@ For staging environments and automated rebuilds, database installation and confi
 1. **Synchronize Packages and Scripts from the Bastion (`applayer-1`):**
    Run the sync script on the Bastion Host:
    ```bash
-   cd ~/iot-bigdata-project
+   cd ~/factory-telemetry
    chmod +x infra/scripts/sync-packages-to-s3.sh
    ./infra/scripts/sync-packages-to-s3.sh
    ```
@@ -198,7 +198,7 @@ For staging environments and automated rebuilds, database installation and confi
    When provisioning database instances, the `user_data` script:
    - Polls S3 waiting for `sync_complete.flag`.
    - Downloads the RPMs, scripts, and secrets.
-   - Executes [provision-db-primary.sh](file:///home/cheshire/iot-bigdata-project/infra/scripts/provision-db-primary.sh) (on `datalayer-1`) or [provision-db-replica.sh](file:///home/cheshire/iot-bigdata-project/infra/scripts/provision-db-replica.sh) (on `datalayer-2`) locally.
+   - Executes [provision-db-primary.sh](file:///home/cheshire/factory-telemetry/infra/scripts/provision-db-primary.sh) (on `datalayer-1`) or [provision-db-replica.sh](file:///home/cheshire/factory-telemetry/infra/scripts/provision-db-replica.sh) (on `datalayer-2`) locally.
 
 3. **Manual Trigger of Provisioning Scripts (if needed):**
    If you need to re-run the provisioning on running VMs:
@@ -396,7 +396,7 @@ To protect primary write operations, read-only workloads are offloaded to the st
    ```
 3. **Recreate Grafana Container:**
    ```bash
-   cd ~/iot-bigdata-project/infra
+   cd ~/factory-telemetry/infra
    docker compose up -d --force-recreate grafana
    ```
 
@@ -430,7 +430,7 @@ The database will delete `standby.signal`, increment the timeline ID, and accept
    ```
 2. **Restart Services:**
    ```bash
-   cd ~/iot-bigdata-project/infra
+   cd ~/factory-telemetry/infra
    docker compose up -d --force-recreate grafana
    sudo systemctl restart iot-backend
    ```
@@ -489,7 +489,7 @@ Once the failed node is online again, reconfigure it as the standby replica.
 
 5. **Update replication host variables** on `applayer-1`:
    ```bash
-   cd ~/iot-bigdata-project/infra
+   cd ~/factory-telemetry/infra
    sed -i 's/^POSTGRES_HOST_REPLICA=.*/POSTGRES_HOST_REPLICA=10.x.2.10/' .env
    docker compose up -d --force-recreate grafana
    ```

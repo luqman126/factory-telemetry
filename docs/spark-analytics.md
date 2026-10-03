@@ -139,9 +139,9 @@ The coordinator script located at `spark-jobs/run_hourly_pipeline.sh`:
 ### 2. Register Service and Timer
 Copy configuration files:
 ```bash
-chmod +x ~/iot-bigdata-project/spark-jobs/run_hourly_pipeline.sh
-sudo cp ~/iot-bigdata-project/infra/systemd/iot-analytics.service /etc/systemd/system/
-sudo cp ~/iot-bigdata-project/infra/systemd/iot-analytics.timer /etc/systemd/system/
+chmod +x ~/factory-telemetry/spark-jobs/run_hourly_pipeline.sh
+sudo cp ~/factory-telemetry/infra/systemd/iot-analytics.service /etc/systemd/system/
+sudo cp ~/factory-telemetry/infra/systemd/iot-analytics.timer /etc/systemd/system/
 
 sudo systemctl daemon-reload
 sudo systemctl start iot-analytics.service
