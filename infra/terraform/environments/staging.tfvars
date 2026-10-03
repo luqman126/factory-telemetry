@@ -28,7 +28,7 @@ ebs_volume_size         = 30
 applayer_ami_id = "ami-0bca8159489e12972"
 
 # Custom AMI ID for database nodes
-datalayer_ami_id = "ami-032b821dcafc65a40"
+datalayer_ami_id = "ami-0e18654cd88a6361d"
 
 # Custom AMI ID for Spark Worker nodes (Pre-installed Java 21 & Spark 3.5.8)
 worker_ami_id = "ami-03256949a823ccf8b"

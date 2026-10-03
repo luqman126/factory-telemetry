@@ -352,12 +352,13 @@ sudo journalctl -u iot-analytics.service --no-pager -n 20
 
 Expected output:
 ```
-=== [date] Memulai Pipeline Batch Spark per-Jam ===
-Menjalankan export_to_parquet.py...
-Berhasil query N baris dari DB
-Upload ke S3: s3://bucket-name/raw/sensor_YYYYMMDD_HHMMSS_YYYYMMDD_HHMMSS.parquet
-Memicu spark-submit untuk batch_analytics.py...
-=== [date] Pipeline Batch Spark Jam-an Selesai dengan Sukses ===
+=== [date] Starting Hourly Spark Batch Pipeline ===
+Running export_to_parquet.py...
+Records  : N
+Analytics saved: 3 device metrics
+Anomalies saved via distributed JDBC write
+Completed in XX.XX seconds
+=== [date] Hourly Spark Batch pipeline is complete successfully ===
 ```
 
 ### Database Replication Status

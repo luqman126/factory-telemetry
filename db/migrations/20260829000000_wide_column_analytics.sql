@@ -1,4 +1,4 @@
--- db/migrations/001_wide_column_analytics.sql
+-- db/migrations/20260829000000_wide_column_analytics.sql
 -- Migration: Transform analytics_results from EAV to wide-Column format
 
 -- migrate:up

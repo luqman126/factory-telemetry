@@ -36,6 +36,17 @@ fi
 
 terraform plan -var-file="environments/${ENV}.tfvars" ${SECRET_OPT} -out="${ENV}.tfplan"
 
+# --- Gate: Review Plan Before Apply ---
+if [[ -t 0 ]]; then
+    echo ""
+    read -rp "Review the plan above. Proceed with apply? [y/N]: " CONFIRM
+    if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
+        echo "Aborted by operator."
+        rm -f "${ENV}.tfplan"
+        exit 0
+    fi
+fi
+
 # --- Phase 2: Terraform Apply ---
 echo ""
 echo "=== [Phase 2/3] Provisioning Infrastructure & Auto-Uploading Scripts ==="

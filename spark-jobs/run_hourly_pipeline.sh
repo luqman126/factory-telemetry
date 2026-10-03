@@ -4,7 +4,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "=== [$(date)] Memulai Pipeline Batch Spark per-Jam ==="
+echo "=== [$(date)] Starting Hourly Spark Batch Pipeline ==="
 
 # User infra_iot_net for local dev, or host/bridge for EC2 VPC access
 DOCKER_NET="${DOCKER_NET:-infra_iot_net}"
