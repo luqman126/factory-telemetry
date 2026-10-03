@@ -119,7 +119,7 @@ run_bench_spark() {
 # ============================================================
 echo "============================================"
 echo "  BENCHMARK COMPARISON SUITE"
-echo "  Project: iot-bigdata-project"
+echo "  Project: factory-telemetry"
 echo "============================================"
 echo ""
 

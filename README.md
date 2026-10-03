@@ -1,4 +1,4 @@
-# IoT Big Data: Factory Telemetry and Control Pipeline
+# Factory Telemetry: Real-Time Industrial IoT & Control Pipeline
 
 > End-to-end IoT telemetry pipeline for factory monitoring with real-time MQTT ingestion, hourly Spark anomaly detection, and millisecond closed-loop actuator control. Self-hosted on AWS, fully automated with Terraform, Packer, and Ansible.
 
@@ -48,7 +48,7 @@ The entire infrastructure (networking, compute, security, secrets) is defined as
 
 | Decision | Rationale | Outcome |
 |:---|:---|:---|
-| Self-hosted TimescaleDB with streaming replication instead of Amazon RDS | Demonstrate WAL management, replication slot configuration, and manual failover procedures | Zero-RPO standby replica with active streaming replication slot |
+| Self-hosted TimescaleDB with Patroni HA instead of Amazon RDS | Demonstrate WAL management, automated consensus-based failover, and split-brain prevention | Zero-RPO standby replica with automated Patroni/etcd leader election and HAProxy traffic routing |
 | Packer custom AMIs with Ansible provisioning instead of bash scripts | v1.0 bash scripts were fragile and not idempotent; re-running them on a live system caused failures | Provisioning time reduced from ~15 min to ~2 min; fully idempotent re-runs |
 | Spark Local Mode for hourly batch instead of always-on distributed cluster | CPU utilization sits at 1-2% between hourly runs; dedicated workers waste resources for 59 minutes per hour | 28.56s processing time for 1M records with zero idle resource cost |
 | Closed-loop MQTT control instead of one-way telemetry | Factory safety requires immediate actuator response when overheating is detected | Millisecond fan control response via MQTT publish-back from backend |
@@ -60,7 +60,7 @@ This project deliberately uses self-hosted open-source components instead of man
 
 | Our Decision | Production Alternative | What We Demonstrate |
 |:---|:---|:---|
-| PostgreSQL + TimescaleDB on EC2 | Amazon RDS / Aurora | Streaming replication configuration, WAL management, manual failover procedures |
+| PostgreSQL + TimescaleDB + Patroni on EC2 | Amazon RDS / Aurora | Streaming replication, Raft consensus (etcd), automated failover, HAProxy L4 routing |
 | Spark on EC2 (local mode + experimental distributed workers) | AWS EMR / Glue | Ephemeral worker lifecycle benchmarking, coordination overhead analysis, Amdahl's Law validation |
 | Docker Compose on a single host | ECS / EKS (Kubernetes) | Container networking, volume persistence, service dependency management |
 | Self-hosted Mosquitto | AWS IoT Core / HiveMQ Cloud | TLS certificate provisioning, ACL enforcement, pub/sub topic architecture |
@@ -224,7 +224,7 @@ Refer to the [documentation guides](#documentation) for detailed setup instructi
 ## Project Directory Layout
 
 ```text
-iot-bigdata-project/
+factory-telemetry/
 ├── .github/workflows/              # CI/CD pipeline definitions
 │   ├── deploy-staging.yml          # Deploys on push to staging branch
 │   └── deploy-production.yml       # Deploys on push to main branch
@@ -239,6 +239,9 @@ iot-bigdata-project/
 │   ├── roles/                      # Ansible roles
 │   │   ├── alloy_agent/            # Grafana Alloy monitoring agent setup
 │   │   ├── applayer/               # Certbot SSL, Cloudflare Tunnel, scripts
+│   │   ├── etcd/                   # Raft Distributed Consensus Store (DCS)
+│   │   ├── haproxy/                # Layer 4 TCP proxy for read/write splitting
+│   │   ├── patroni/                # HA PostgreSQL template and daemon management
 │   │   ├── timescaledb_primary/    # Primary DB setup, init.sql migration
 │   │   └── timescaledb_replica/    # Streaming replication configuration
 │   └── templates/                  # Jinja2 templates for configs
@@ -291,6 +294,7 @@ iot-bigdata-project/
 │   │   └── datalayer.pkr.hcl       # Datalayer AMI template
 │   ├── scripts/                    # Deployment automation
 │   │   ├── deploy-environment.sh   # Master orchestrator (plan, apply, ansible)
+│   │   ├── destroy-environment.sh  # Safe teardown script (terraform destroy)
 │   │   ├── run-ansible.sh          # Dynamic inventory + ansible-playbook runner
 │   │   ├── deploy-mqtt-cert.sh     # TLS certificate deployment helper
 │   │   └── fetch-secrets.sh        # SSM Parameter Store secret fetcher
@@ -307,7 +311,7 @@ iot-bigdata-project/
 │   └── terraform-bootstrap/        # One-time S3 backend and DynamoDB setup
 │
 ├── docs/                           # Technical documentation
-│   ├── architecture.jpg            # System topology architecture diagram
+│   ├── architecture.png            # System topology architecture diagram
 │   ├── diagram.py                  # Diagrams-as-Code generator (Python)
 │   ├── infrastructure.md           # AWS topology and architecture
 │   ├── database.md                 # Replication, failover, and WAL management
@@ -315,6 +319,8 @@ iot-bigdata-project/
 │   ├── edge-device-integration.md  # MQTT payload schemas and validation
 │   ├── retrospective.md            # Chronological engineering failure log
 │   ├── adr/                        # Architecture Decision Records
+│   ├── images/                     # Production evidence screenshots and charts
+│   ├── journey/                    # Chronological engineering development logs
 │   └── versions/                   # Release notes per version
 │
 ├── .gitignore
@@ -538,8 +544,9 @@ While the current architecture successfully proves the end-to-end flow of IoT te
 
 ### Completed (v2.0)
 
-- **Configuration Management (Ansible):** Replaced fragile bash provisioning scripts with idempotent Ansible playbooks and roles (`timescaledb_primary`, `timescaledb_replica`, `applayer`, `alloy_agent`). Scripts are now safe to re-run on live systems.
+- **Configuration Management (Ansible):** Replaced fragile bash provisioning scripts with idempotent Ansible playbooks and roles (`timescaledb_primary`, `timescaledb_replica`, `applayer`, `alloy_agent`, `etcd`, `haproxy`, `patroni`). Scripts are now safe to re-run on live systems.
 - **Custom AMI Pipeline (Packer):** Baked PostgreSQL 16, TimescaleDB, Java 21, Spark 3.5, Docker, and Grafana Alloy into pre-built AMIs using Packer with Ansible provisioners. Eliminated the S3 RPM relay pipeline and reduced node provisioning time from ~15 minutes to ~2 minutes.
+- **Automated High Availability & Consensus (Patroni + etcd + HAProxy):** Replaced manual failover procedures with an automated consensus-driven HA cluster. Patroni manages PostgreSQL failover with an etcd Raft DCS, while Layer 4 HAProxy transparently routes writes (`port 5000`) and reads (`port 5001`) with zero data loss and automated `pg_rewind` resynchronization.
 
 ### Near-Term (Planned)
 
