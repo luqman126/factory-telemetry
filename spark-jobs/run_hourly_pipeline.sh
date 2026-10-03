@@ -1,92 +1,45 @@
 #!/bin/bash
-# ==============================================================================
-# spark-jobs/run_hourly_pipeline.sh
-# Orkestrator Pipeline Batch Spark Jam-an
-# Alur:
-# 1. Masuk ke direktori script ini berada.
-# 2. Aktifkan virtual environment python.
-# 3. Jalankan export_to_parquet.py untuk export data dari Postgres replica ke S3.
-# 4. Tangkap S3 URI hasil upload.
-# 5. Jika tidak ada data baru (S3 URI kosong/None), keluar dengan sukses (graceful exit).
-# 6. Jika ada data, jalankan spark-submit dengan Spark Local Mode.
-# ==============================================================================
-
 set -e
 
-# Masuk ke direktori tempat script ini berada
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "=== [$(date)] Memulai Pipeline Batch Spark per-Jam ==="
+echo "=== [$(date)] Starting Hourly Spark Batch Pipeline ==="
 
-# Load environment variables dari file .env di direktori infra (jika ada)
-ENV_PATH="$SCRIPT_DIR/../infra/.env"
-if [ -f "$ENV_PATH" ]; then
-    echo "Loading environment variables dari $ENV_PATH..."
-    # load tapi exclude comment
-    export $(grep -v '^#' "$ENV_PATH" | xargs)
-fi
+# User infra_iot_net for local dev, or host/bridge for EC2 VPC access
+DOCKER_NET="${DOCKER_NET:-infra_iot_net}"
 
-# Resolve JAVA_HOME jika belum di-set (sangat penting untuk systemd service)
-if [ -z "$JAVA_HOME" ]; then
-    if command -v java >/dev/null 2>&1; then
-        JAVA_PATH=$(readlink -f $(command -v java))
-        export JAVA_HOME="${JAVA_PATH%/bin/java}"
-        echo "Resolved JAVA_HOME to: $JAVA_HOME"
-    else
-        echo "WARNING: java command not found" >&2
-    fi
-fi
+# 1. Run export_to_parquet.py inside the container with volume mount
+echo "Running export_to_parquet.py..."
+docker run --rm \
+    --name iot_spark \
+    --network "$DOCKER_NET" \
+    -v "$SCRIPT_DIR/data:/spark-jobs/data" \
+    --env-file "$SCRIPT_DIR/../infra/.env" \
+    iot-spark:latest \
+    python3.12 export_to_parquet.py
 
-# Resolve SPARK_HOME jika belum di-set
-if [ -z "$SPARK_HOME" ]; then
-    if [ -d "/opt/spark" ]; then
-        export SPARK_HOME="/opt/spark"
-        echo "Resolved SPARK_HOME to: $SPARK_HOME"
-    fi
-fi
-
-# Aktifkan virtual environment
-if [ -d ".venv" ]; then
-    echo "Mengaktifkan virtual environment..."
-    source .venv/bin/activate
-else
-    echo "ERROR: Virtual environment .venv tidak ditemukan di $SCRIPT_DIR!" >&2
-    exit 1
-fi
-
-# Jalankan export_to_parquet.py dan tangkap output S3 URI
-echo "Menjalankan export_to_parquet.py..."
-EXPORT_OUTPUT=$(python3.12 export_to_parquet.py)
-echo "$EXPORT_OUTPUT"
-
-# Ekstrak S3 URI menggunakan grep dan cut
-S3_URI=$(echo "$EXPORT_OUTPUT" | grep "S3 URI: " | cut -d' ' -f3 || true)
-
-if [ -z "$S3_URI" ] || [ "$S3_URI" = "None" ]; then
-    echo "=== [$(date)] Tidak ada data baru untuk dianalisis. Pipeline selesai dengan sukses (graceful exit). ==="
+# 2. Read S3 URI from file (deterministic handoff)
+URI_FILE="$SCRIPT_DIR/data/last_export_uri.txt"
+if [ ! -f "$URI_FILE" ] || [ ! -s "$URI_FILE" ]; then
+    echo "=== [$(date)] No new data to analyze. Pipeline exiting cleanly. ==="
     exit 0
 fi
 
-echo "S3 URI yang terdeteksi: $S3_URI"
+S3_URI=$(cat "$URI_FILE")
+echo "S3 URI detected: $S3_URI"
 
-# Cari spark-submit binary
-SPARK_SUBMIT="spark-submit"
-if [ -x "/opt/spark/bin/spark-submit" ]; then
-    SPARK_SUBMIT="/opt/spark/bin/spark-submit"
-elif [ -n "$SPARK_HOME" ] && [ -x "$SPARK_HOME/bin/spark-submit" ]; then
-    SPARK_SUBMIT="$SPARK_HOME/bin/spark-submit"
-fi
+# 3. Run Spark batch analytics inside container
+echo "Running batch_analytics.py..."
+docker run --rm \
+    --name iot_spark \
+    --network "$DOCKER_NET" \
+    --env-file "$SCRIPT_DIR/../infra/.env" \
+    iot-spark:latest \
+    spark-submit \
+    --master "local[*]" \
+    --driver-memory 512m \
+    --executor-memory 512m \
+    batch_analytics.py "$S3_URI" 0
 
-echo "Menggunakan binary spark-submit: $SPARK_SUBMIT"
-
-# Jalankan spark-submit menggunakan local[*] mode dengan batasan memori
-echo "Memicu spark-submit untuk batch_analytics.py..."
-$SPARK_SUBMIT \
-  --master "local[*]" \
-  --executor-memory 512m \
-  --driver-memory 512m \
-  --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.261,org.postgresql:postgresql:42.7.4 \
-  batch_analytics.py "$S3_URI" 0
-
-echo "=== [$(date)] Pipeline Batch Spark Jam-an Selesai dengan Sukses ==="
+echo "=== [$(date)] Hourly Spark Batch pipeline is complete successfully ==="

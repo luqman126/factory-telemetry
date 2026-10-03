@@ -42,6 +42,14 @@
     name: python3-psycopg2
     state: present
 
+- name: Set password for postgres superuser (required by Patroni)
+  community.postgresql.postgresql_user:
+    name: postgres
+    password: "{{ db_password }}"
+    state: present
+  become: true
+  become_user: postgres  
+
 - name: Create application database user
   community.postgresql.postgresql_user:
     name: "{{ db_user }}"
@@ -74,14 +82,6 @@
     state: present
   become: true
   become_user: postgres
-
-# Should be located in the installation phase
-- name: Fix TimescaleDB paths for Amazon Linux 2023 compatibility
-  ansible.builtin.shell: |
-    ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.so /usr/lib64/pgsql/
-    ln -sf /usr/lib64/timescaledb-pg16/timescaledb-*.so /usr/lib64/pgsql/
-    ln -sf /usr/lib64/timescaledb-loader-pg16/timescaledb.control /usr/share/pgsql/extension/
-    ln -sf /usr/lib64/timescaledb-pg16/timescaledb--*.sql /usr/share/pgsql/extension/
 
 - name: Enable TimescaleDB extension
   community.postgresql.postgresql_ext:

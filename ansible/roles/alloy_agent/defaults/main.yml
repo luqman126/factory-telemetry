@@ -4,5 +4,4 @@ prometheus_ip: "127.0.0.1"
 alloy_instance_name: "{{ inventory_hostname }}"
 alloy_enable_postgres: false
 db_user: "telemetry_user"
-db_password: "telemetry_secure_pass"
 db_name: "factory_telemetry"

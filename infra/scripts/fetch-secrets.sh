@@ -17,13 +17,13 @@ OUTPUT_FILE="$(dirname "$0")/../.env"
 echo "=== Fetching Secrets from AWS SSM Parameter Store ==="
 echo "Path prefix: ${PREFIX}"
 
-# 1. Pastikan aws cli terinstal
+# 1. Ensure AWS CLI is installed
 if ! command -v aws >/dev/null 2>&1; then
     echo "ERROR: aws-cli is not installed." >&2
     exit 1
 fi
 
-# 2. Ambil parameter store secara rekursif dan parse ke format KEY="VALUE" menggunakan Python
+# 2. Recursively fetch SSM parameters and parse to KEY="VALUE" format using Python
 aws ssm get-parameters-by-path \
   --path "${PREFIX}" \
   --recursive \
@@ -40,17 +40,17 @@ try:
     for param in data:
         name = param["Name"]
         val = param["Value"]
-        # Ambil bagian terakhir setelah slash (contoh: /iot-bigdata/staging/POSTGRES_DB -> POSTGRES_DB)
+        # Extract final segment after slash (e.g., /iot-bigdata/staging/POSTGRES_DB -> POSTGRES_DB)
         key = name.split("/")[-1]
-        # Escape quotes jika ada di dalam value
+        # Escape quotes inside value if present
         val_escaped = val.replace("\"", "\\\"")
-        print(f"{key}=\"{val_escaped}\"")
+        print(f"{key}={val_escaped}")
 except Exception as e:
     print(f"Error parsing SSM json: {e}", file=sys.stderr)
     sys.exit(1)
 ' > "${OUTPUT_FILE}"
 
-# 3. Validasi apakah file .env berhasil terbuat dan tidak kosong
+# 3. Validate that .env was created successfully and is non-empty
 if [ -s "${OUTPUT_FILE}" ]; then
     echo "SUCCESS: Secrets written to ${OUTPUT_FILE}"
 else

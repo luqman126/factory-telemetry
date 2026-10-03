@@ -28,3 +28,38 @@
     src: /usr/lib64/timescaledb-loader-pg16/timescaledb.so
     dest: /usr/lib64/pgsql/timescaledb.so
     state: link
+
+- name: Symlink TimescaleDB control file
+  ansible.builtin.file:
+    src: /usr/lib64/timescaledb-loader-pg16/timescaledb.control
+    dest: /usr/share/pgsql/extension/timescaledb.control
+    state: link
+    force: true
+
+- name: Find TimescaleDB shared engine libraries
+  ansible.builtin.find:
+    paths: /usr/lib64/timescaledb-pg16
+    patterns: "timescaledb-*.so"
+  register: timescale_libs
+
+- name: Symlink TimescaleDB engine libraries to PostgreSQL libdir
+  ansible.builtin.file:
+    src: "{{ item.path }}"
+    dest: "/usr/lib64/pgsql/{{ item.path | basename }}"
+    state: link
+    force: true
+  loop: "{{ timescale_libs.files }}"
+
+- name: Find TimescaleDB extension SQL definitions
+  ansible.builtin.find:
+    paths: /usr/lib64/timescaledb-pg16
+    patterns: "timescaledb--*.sql"
+  register: timescale_sqls
+
+- name: Symlink TimescaleDB extension SQL to PostgreSQL extension dir
+  ansible.builtin.file:
+    src: "{{ item.path }}"
+    dest: "/usr/share/pgsql/extension/{{ item.path | basename }}"
+    state: link
+    force: true
+  loop: "{{ timescale_sqls.files }}"

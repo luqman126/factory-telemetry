@@ -1,24 +1,24 @@
 #!/bin/bash
 # ============================================================
 # spark-jobs/run_with_worker.sh
-# Automasi ephemeral Spark worker:
-#   1. Launch EC2 worker
-#   2. Tunggu instance running
-#   3. Start Spark worker
+# Ephemeral Spark worker orchestration:
+#   1. Launch EC2 worker instances
+#   2. Wait until instances are running
+#   3. Start Spark worker daemon
 #   4. Submit Spark job
-#   5. Terminate EC2 worker
+#   5. Terminate EC2 worker instances
 #
 # Usage:
 #   ./run_with_worker.sh <s3_parquet_uri> <worker_count>
 #
-# Contoh:
+# Example:
 #   ./run_with_worker.sh s3://iot-bigdata-datalake-kagebyo/raw/sensor_xxx.parquet 1
 # ============================================================
 
-set -e  # exit kalau ada command yang gagal
+set -e  # Exit on error
 
 # ============================================================
-# Cleanup trap — pastikan worker di-terminate walau script gagal
+# Cleanup trap - ensures workers are terminated even if the script fails
 # ============================================================
 INSTANCE_IDS=()
 STARTED_MASTER="false"
@@ -42,17 +42,17 @@ cleanup() {
 trap cleanup EXIT
 
 # ============================================================
-# Load konfigurasi dari .env
+# Load configuration from .env
 # ============================================================
 ENV_PATH="$(dirname "$0")/../infra/.env"
 if [ ! -f "$ENV_PATH" ]; then
-    echo "Error: .env tidak ditemukan di $ENV_PATH"
+    echo "Error: .env not found at $ENV_PATH"
     exit 1
 fi
 source "$ENV_PATH"
 
 # ============================================================
-# Konfigurasi
+# Configuration
 # ============================================================
 REGION="ap-southeast-1"
 AMI_ID="ami-03256949a823ccf8b"
@@ -64,11 +64,11 @@ SPARK_HOME="/opt/spark"
 WORKER_NAME="iot-bigdata-worker-ephemeral"
 
 # ============================================================
-# Validasi argumen
+# Argument validation
 # ============================================================
 if [ "$#" -lt 2 ]; then
     echo "Usage: $0 <s3_parquet_uri> <worker_count>"
-    echo "Contoh: $0 s3://bucket/raw/file.parquet 1"
+    echo "Example: $0 s3://bucket/raw/file.parquet 1"
     exit 1
 fi
 
@@ -82,7 +82,7 @@ echo "Workers    : $WORKER_COUNT"
 echo "============================================"
 
 # ============================================================
-# User data — inject public key Node 2 ke worker saat launch
+# User data - inject public key into worker upon launch
 # ============================================================
 PUB_KEY_PATH="$HOME/.ssh/iot-worker-key.pub"
 PRIV_KEY_PATH="$HOME/.ssh/iot-worker-key"
@@ -103,7 +103,7 @@ chmod 600 /home/ec2-user/.ssh/authorized_keys
 EOF
 )
 
-# Array untuk simpan IPs
+# Array to store private IPs
 WORKER_IPS=()
 
 # ============================================================
@@ -121,7 +121,7 @@ else
 fi
 
 # ============================================================
-# Step 1 — Launch semua EC2 worker
+# Step 1 — Launch all EC2 workers
 # ============================================================
 echo ""
 echo "[1/5] Launching $WORKER_COUNT EC2 worker(s)..."
@@ -144,7 +144,7 @@ for i in $(seq 1 "$WORKER_COUNT"); do
 done
 
 # ============================================================
-# Step 2 — Tunggu semua instance running
+# Step 2 — Wait for all instances to be running
 # ============================================================
 echo ""
 echo "[2/5] Waiting for all instances to be running..."
@@ -153,7 +153,7 @@ aws ec2 wait instance-running \
     --region "$REGION" \
     --instance-ids "${INSTANCE_IDS[@]}"
 
-# Ambil private IP semua worker
+# Fetch private IPs of all workers
 for INSTANCE_ID in "${INSTANCE_IDS[@]}"; do
     WORKER_IP=$(aws ec2 describe-instances \
         --region "$REGION" \
@@ -168,7 +168,7 @@ echo "Waiting for SSH to be ready..."
 sleep 30
 
 # ============================================================
-# Step 3 — Start Spark worker di semua instance
+# Step 3 — Start Spark worker daemon on all instances
 # ============================================================
 echo ""
 echo "[3/5] Starting Spark workers..."
@@ -194,7 +194,7 @@ echo "[4/5] Submitting Spark job..."
 
 source "$(dirname "$0")/.venv/bin/activate"
 
-# Deteksi IP VPC driver secara dinamis
+# Detect VPC driver IP dynamically
 DRIVER_IP=$(hostname -I | awk '{print $1}')
 echo "  Driver IP  : $DRIVER_IP"
 
@@ -213,9 +213,9 @@ spark-submit \
     "$WORKER_COUNT"
 
 # ============================================================
-# Step 5 — Done (cleanup trap akan terminate workers otomatis)
+# Step 5 — Done (cleanup trap will terminate workers automatically)
 # ============================================================
 echo ""
 echo "============================================"
-echo "Job selesai. Workers akan di-terminate oleh cleanup trap."
+echo "Job completed. Workers will be terminated by the cleanup trap."
 echo "============================================"

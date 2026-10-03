@@ -1,8 +1,0 @@
----
-# Playbook to test the timescaledb_replica role
-- name: Test TimescaleDB Replica Role
-  hosts: local
-  gather_facts: false
-
-  roles:
-    - timescaledb_replica

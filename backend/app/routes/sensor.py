@@ -1,6 +1,6 @@
 # ============================================================
 # app/routes/sensor.py
-# HTTP endpoint untuk ingestion data sensor
+# HTTP endpoints for sensor data ingestion and retrieval
 # ============================================================
 
 import logging
@@ -16,8 +16,8 @@ router = APIRouter(prefix="/sensors", tags=["sensors"])
 
 # ------------------------------------------------------------
 # POST /sensors/ingest
-# Terima satu payload sensor via HTTP, simpan ke DB
-# Ini alternatif selain MQTT — berguna untuk testing manual
+# Ingest a single sensor payload via HTTP and persist to DB
+# Alternative ingestion path to MQTT — useful for manual testing
 # ------------------------------------------------------------
 @router.post("/ingest", status_code=status.HTTP_201_CREATED)
 async def ingest_sensor(payload: SensorPayload):
@@ -28,17 +28,17 @@ async def ingest_sensor(payload: SensorPayload):
         logger.info(f"HTTP ingest: {payload.device_id} | {payload.location}")
         return {"status": "ok", "device_id": payload.device_id}
     except Exception as e:
-        logger.error(f"Gagal insert via HTTP: {e}")
+        logger.error(f"Failed HTTP ingest: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Gagal menyimpan data sensor"
+            detail="Failed to persist sensor data"
         )
 
 
 # ------------------------------------------------------------
 # GET /sensors/latest/{device_id}
-# Ambil data terbaru dari device tertentu
-# Berguna untuk verifikasi data masuk saat testing
+# Retrieve recent readings for a specific device
+# Useful for ingestion verification during testing
 # ------------------------------------------------------------
 @router.get("/latest/{device_id}")
 async def get_latest(device_id: str):
@@ -59,10 +59,10 @@ async def get_latest(device_id: str):
             rows = cur.fetchall()
         return {"device_id": device_id, "data": rows}
     except Exception as e:
-        logger.error(f"Gagal ambil data: {e}")
+        logger.error(f"Failed to fetch data: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Gagal mengambil data"
+            detail="Failed to retrieve sensor data"
         )
     finally:
         POOL.putconn(conn)

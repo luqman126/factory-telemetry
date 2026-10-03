@@ -1,19 +1,19 @@
 -- ============================================================
 -- init.sql
--- Schema untuk IoT Soldering Workstation Monitoring
+-- Schema for IoT Soldering Workstation Monitoring
 -- PostgreSQL + TimescaleDB
 -- ============================================================
 
--- Aktifkan extension TimescaleDB
+-- Enable TimescaleDB extension
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 
 -- ============================================================
 -- TABLE: devices
 -- ============================================================
--- Dibuat duluan karena tabel lain referensi device_id dari sini.
--- Tidak pakai foreign key constraint ke sensor_readings supaya
--- ingestion tidak terhambat kalau device belum terdaftar.
+-- Created first so other tables can reference device_id.
+-- No foreign key constraint to sensor_readings to avoid blocking
+-- ingestion if a device is not yet pre-registered.
 
 CREATE TABLE IF NOT EXISTS devices (
     device_id           VARCHAR(64)         PRIMARY KEY,
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS devices (
     active              BOOLEAN             NOT NULL DEFAULT TRUE
 );
 
--- Seed: 3 device awal untuk simulasi
+-- Seed: 3 initial devices for simulation
 INSERT INTO devices (device_id, device_name, location) VALUES
     ('device_001', 'Workstation A', 'soldering_area_1'),
     ('device_002', 'Workstation B', 'soldering_area_1'),
@@ -34,9 +34,13 @@ ON CONFLICT (device_id) DO NOTHING;
 -- ============================================================
 -- TABLE: sensor_readings
 -- ============================================================
--- Hypertable utama. TimescaleDB akan partisi otomatis per 1 hari.
--- Pakai DOUBLE PRECISION (eksplisit) bukan FLOAT (ambigu).
--- Pakai CHECK constraint untuk nilai yang punya range logis.
+-- Main hypertable. TimescaleDB automatically partitions per 1 day interval.
+-- Uses explicit DOUBLE PRECISION rather than ambiguous FLOAT.
+-- Uses CHECK constraints for physically bounded sensor ranges.
+-- location is denormalize deliberately from devices table for these following purpose:
+-- 1. Point-in-time snapshot: if device be move to other room, the history of the data remain accurate.
+-- 2. Query performance: avoid JOIN on hypertable that has million of rows in Grafana/Spark.
+-- 3. Storage overhead will be minimum because the TimescaleDB compression use encodin dictionary.
 
 CREATE TABLE IF NOT EXISTS sensor_readings (
 
@@ -44,7 +48,7 @@ CREATE TABLE IF NOT EXISTS sensor_readings (
     device_id           VARCHAR(64)         NOT NULL,
     location            VARCHAR(128)        NOT NULL,
 
-    -- Suhu dan kelembaban
+    -- Temperature and humidity
     temperature         DOUBLE PRECISION    CHECK (temperature BETWEEN -10 AND 100),   -- Celsius
     humidity            DOUBLE PRECISION    CHECK (humidity BETWEEN 0 AND 100),        -- %RH
 
@@ -54,14 +58,14 @@ CREATE TABLE IF NOT EXISTS sensor_readings (
     accel_z             DOUBLE PRECISION,   -- m/s²
     vibration_rms       DOUBLE PRECISION    CHECK (vibration_rms >= 0),               -- m/s²
 
-    -- Uap flux solder
+    -- Solder flux vapor
     flux_ppm            DOUBLE PRECISION    CHECK (flux_ppm >= 0),                    -- ppm
     flux_aqi            INTEGER             CHECK (flux_aqi BETWEEN 0 AND 500),       -- AQI
     voc_level           VARCHAR(16)         CHECK (voc_level IN ('GOOD', 'MODERATE', 'UNHEALTHY', 'HAZARDOUS'))
 
 );
 
--- Konversi ke hypertable, partisi per 1 hari
+-- Convert to hypertable, partitioned by 1 day interval
 SELECT create_hypertable(
     'sensor_readings',
     'time',
@@ -69,20 +73,20 @@ SELECT create_hypertable(
     if_not_exists => TRUE
 );
 
--- Index untuk query per device dalam rentang waktu tertentu
+-- Index for device-specific time-range queries
 CREATE INDEX IF NOT EXISTS idx_sensor_device_time
     ON sensor_readings (device_id, time DESC);
 
--- Retention policy: hapus data raw yang lebih dari 90 hari
--- (chunk lama di-drop otomatis oleh background job TimescaleDB)
+-- Retention policy: drop raw telemetry older than 90 days
+-- (Old chunks dropped automatically via TimescaleDB background job)
 SELECT add_retention_policy(
     'sensor_readings',
     INTERVAL '90 days',
     if_not_exists => TRUE
 );
 
--- Compression policy: compress chunk yang sudah lebih dari 7 hari
--- Chunk lama jarang ditulis ulang, jadi aman di-compress untuk hemat storage
+-- Compression policy: compress chunks older than 7 days
+-- Historical chunks are immutable and safely compressed to save disk space
 ALTER TABLE sensor_readings SET (
     timescaledb.compress,
     timescaledb.compress_orderby = 'time DESC',
@@ -99,8 +103,8 @@ SELECT add_compression_policy(
 -- ============================================================
 -- TABLE: analytics_results
 -- ============================================================
--- Output dari Spark batch job.
--- Satu baris = satu metric, satu device, satu window waktu.
+-- Output from Spark batch jobs.
+-- One row = one metric, one device, one time window.
 
 CREATE TABLE IF NOT EXISTS analytics_results (
     id                  SERIAL              PRIMARY KEY,
@@ -112,16 +116,16 @@ CREATE TABLE IF NOT EXISTS analytics_results (
     metric_name         VARCHAR(64)         NOT NULL,
     metric_value        DOUBLE PRECISION,
 
-    -- Referensi ke spark_job_log untuk tahu job mana yang menghasilkan baris ini
-    -- (join ke spark_job_log untuk dapat worker_count, execution_time_sec, dll)
+    -- Reference to spark_job_log identifying which batch job produced this record
+    -- (join on spark_job_log to obtain worker_count, execution_time_sec, etc.)
     job_id              VARCHAR(64)
 );
 
 CREATE INDEX IF NOT EXISTS idx_analytics_device_window
     ON analytics_results (device_id, window_start DESC);
 
--- Retention: simpan hasil analytics 1 tahun
--- (tidak pakai hypertable, cukup partial index + manual cleanup kalau perlu)
+-- Retention: retain analytics results for 1 year
+-- (Standard relational table with partial index + manual pruning if needed)
 
 
 -- ============================================================
@@ -148,8 +152,8 @@ CREATE INDEX IF NOT EXISTS idx_anomaly_device_time
 -- ============================================================
 -- TABLE: spark_job_log
 -- ============================================================
--- Tracking setiap batch job yang dijalankan.
--- Dipakai untuk eksperimen perbandingan: master only vs multi-worker.
+-- Tracks each batch job execution.
+-- Used for benchmarking experiments: standalone master vs multi-worker cluster.
 
 CREATE TABLE IF NOT EXISTS spark_job_log (
     id                  SERIAL              PRIMARY KEY,

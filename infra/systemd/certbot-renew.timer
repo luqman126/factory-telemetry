@@ -1,9 +1,9 @@
 [Unit]
-Description=Run certbot renew dua kali sehari (Let's Encrypt best practice)
+Description=Run certbot renew twice daily (Let's Encrypt best practice)
 
 [Timer]
-# Jalankan jam 00:00 dan 12:00 dengan random delay supaya tidak semua
-# client hit Let's Encrypt di waktu bersamaan
+# Run at 00:00 and 12:00 with random jitter to prevent synchronized load
+# against Let's Encrypt servers across multiple clients
 OnCalendar=*-*-* 00,12:00:00
 RandomizedDelaySec=3600
 Persistent=true

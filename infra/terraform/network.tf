@@ -1,11 +1,11 @@
 # ============================================================
 # infra/terraform/network.tf
 # Network Layer — VPC, Subnets, IGW, Route Tables, S3 Endpoint
-# Replika topologi Production: 1 Public + 1 Private Subnet
+# Topology replica of Production: 1 Public + 1 Private Subnet
 # ============================================================
 
 # ---- VPC ----
-# "Gedung" utama tempat semua server tinggal
+# Main VPC housing all project compute resources
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
@@ -17,7 +17,7 @@ resource "aws_vpc" "main" {
 }
 
 # ---- Subnets ----
-# Public Subnet — tempat applayer (bisa akses internet)
+# Public Subnet — hosts applayer (internet-facing)
 resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = var.public_subnet_cidr
@@ -29,7 +29,7 @@ resource "aws_subnet" "public" {
   }
 }
 
-# Private Subnet — tempat datalayer & worker (TANPA akses internet)
+# Private Subnet — hosts datalayer & workers (isolated from direct internet access)
 resource "aws_subnet" "private" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = var.private_subnet_cidr
@@ -42,7 +42,7 @@ resource "aws_subnet" "private" {
 }
 
 # ---- Internet Gateway ----
-# "Pintu keluar" ke internet, HANYA untuk public subnet
+# Internet gateway for public subnet inbound/outbound traffic
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
@@ -53,7 +53,7 @@ resource "aws_internet_gateway" "main" {
 
 # ---- Route Tables ----
 
-# Route table untuk PUBLIC subnet — ada rute ke internet
+# Route table for PUBLIC subnet — routes default traffic via IGW
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
@@ -67,33 +67,33 @@ resource "aws_route_table" "public" {
   }
 }
 
-# Kaitkan route table public ke public subnet
+# Associate public route table with public subnet
 resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public.id
   route_table_id = aws_route_table.public.id
 }
 
-# Route table untuk PRIVATE subnet — TIDAK ada rute ke internet
+# Route table for PRIVATE subnet — NO internet route
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
 
-  # Sengaja TIDAK ada route ke 0.0.0.0/0
-  # Private subnet benar-benar terisolasi dari internet
+  # Deliberately NO route to 0.0.0.0/0
+  # Private subnet is completely isolated from the internet
 
   tags = {
     Name = "${var.project_name}-${var.environment}-private-rt"
   }
 }
 
-# Kaitkan route table private ke private subnet
+# Associate private route table with private subnet
 resource "aws_route_table_association" "private" {
   subnet_id      = aws_subnet.private.id
   route_table_id = aws_route_table.private.id
 }
 
-# ---- VPC Endpoint untuk S3 (Gateway) ----
-# Agar server di private subnet bisa akses S3 TANPA internet
-# Biaya: GRATIS
+# ---- VPC Endpoint for S3 (Gateway) ----
+# Allows servers in private subnet to access S3 WITHOUT internet egress
+# Cost: Free
 resource "aws_vpc_endpoint" "s3" {
   vpc_id          = aws_vpc.main.id
   service_name    = "com.amazonaws.${var.aws_region}.s3"

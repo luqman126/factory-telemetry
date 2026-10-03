@@ -30,13 +30,15 @@ A factory floor has three operational zones, each with different environmental r
 
 | Zone | Sensors | Business Risk |
 |:---|:---|:---|
-| **Production Area** (`ruang_produksi`) | Temperature, Vibration (MPU6050) | Machine overheating or bearing wear halts the assembly line |
-| **Soldering Area** (`ruang_penyolderan`) | Temperature, Gas/VOC (MQ-135) | Toxic flux fumes endanger worker health and violate safety regulations |
-| **Storage Area** (`ruang_penyimpanan`) | Temperature | Excessive heat damages stored components and raw materials |
+| **Production Area** (`ruang_produksi`) | Temperature & Humidity (DHT22), Vibration (MPU6050) | Machine overheating or bearing wear halts the assembly line |
+| **Soldering Area** (`ruang_penyolderan`) | Temperature & Humidity (DHT22), Gas/VOC (MQ-135) | Toxic flux fumes endanger worker health and violate safety regulations |
+| **Storage Area** (`ruang_penyimpanan`) | Temperature & Humidity (DHT22) | Excessive heat or humidity damages stored components and raw materials |
+
+> **Note on Zone Naming:** Zone identifiers use Indonesian terminology (`ruang_produksi` = Production Area, `ruang_penyolderan` = Soldering Area, `ruang_penyimpanan` = Storage Area). These keys are intentionally preserved across the codebase to maintain backward compatibility with established MQTT topic paths, existing database records, Grafana dashboard queries, and simulator configurations without requiring complex data migrations.
 
 ### The Solution
 
-This project is a full-stack IoT monitoring pipeline for a simulated manufacturing facility. Sensors across three factory zones continuously stream temperature, vibration, and gas readings to a cloud backend over TLS-encrypted MQTT. The backend validates, stores, and analyzes the data in real time. When a dangerous condition is detected (e.g., overheating), it publishes a control command back to the device within milliseconds.
+This project is a full-stack IoT monitoring pipeline for a simulated manufacturing facility. Sensors across three factory zones continuously stream temperature, humidity, vibration, and gas readings to a cloud backend over TLS-encrypted MQTT. The backend validates, stores, and analyzes the data in real time. When a dangerous condition is detected (e.g., overheating), it publishes a control command back to the device within milliseconds.
 
 Raw telemetry is stored in a TimescaleDB time-series database with automatic hypertable partitioning. For long-term retention and heavy analytical workloads, data is exported hourly to Amazon S3 as compressed Parquet files and processed by Apache Spark batch jobs for aggregation and anomaly detection.
 
@@ -89,8 +91,8 @@ This project deliberately uses self-hosted open-source components instead of man
 |:---|:---|:---|:---|
 | MQTT Broker | `infra/mosquitto/` | Eclipse Mosquitto 2 | TLS-encrypted IoT telemetry ingestion on port 8883 |
 | Backend API | `backend/app/` | FastAPI, Paho MQTT, Uvicorn | MQTT message processing, database writes, closed-loop control |
-| Database (Primary) | `db/init.sql` | PostgreSQL 16, TimescaleDB 2.x | Time-series storage with hypertable partitioning |
-| Database (Replica) | `ansible/roles/timescaledb_replica/` | PostgreSQL 16 Streaming Replication | Hot standby for read offloading and disaster recovery |
+| Database Cluster | `db/init.sql`, `ansible/roles/patroni/` | PostgreSQL 16, TimescaleDB 2.x, Patroni | HA time-series cluster with automated failover and zero data loss |
+| Consensus & L4 Proxy | `ansible/roles/etcd/`, `ansible/roles/haproxy/` | etcd 3.5, HAProxy | Raft DCS quorum and Layer 4 TCP routing for read/write splitting |
 | Batch Analytics | `spark-jobs/` | Apache Spark 3.5, PySpark | Hourly aggregation, anomaly detection, S3 Parquet archival |
 | IoT Simulator | `simulator/` | Python, Paho MQTT | Multi-device telemetry simulation with anomaly injection |
 | Monitoring | `grafana/provisioning/`, `infra/prometheus/` | Grafana, Prometheus, Alloy | Dashboards, alerting (Telegram), metrics collection |
@@ -104,8 +106,8 @@ The infrastructure runs on a custom VPC with public and private subnets in `ap-s
 
 | Subnet | What Lives Here | Internet Access |
 |:---|:---|:---|
-| **Public** (`10.x.1.0/24`) | Mosquitto, FastAPI, Grafana, Spark | Yes (via Internet Gateway) |
-| **Private** (`10.x.2.0/24`) | TimescaleDB Primary, TimescaleDB Standby | None (air-gapped) |
+| **Public** (`10.x.1.0/24`) | Mosquitto, FastAPI, Grafana, Spark Master, etcd (DCS), HAProxy (L4 Proxy) | Yes (via Internet Gateway) |
+| **Private** (`10.x.2.0/24`) | `datalayer-1` & `datalayer-2` (Patroni-managed TimescaleDB HA cluster) | None (air-gapped) |
 
 ### Security Boundaries
 
@@ -122,9 +124,9 @@ Infrastructure is provisioned through a three-phase pipeline:
 
 2. **Infrastructure Provisioning (Terraform):** `terraform apply` provisions the VPC, subnets, security groups, S3 buckets, IAM roles, SSM parameters, and launches EC2 instances from the custom AMIs. Each node's `user_data` script registers with the Tailscale mesh VPN on boot.
 
-3. **Post-Deploy Configuration (Ansible):** `run-ansible.sh` dynamically generates an inventory from Terraform outputs, fetches secrets from AWS SSM Parameter Store, and runs Ansible playbooks to configure TimescaleDB streaming replication, Certbot SSL certificates, Cloudflare Tunnel, and Grafana Alloy monitoring agents.
+3. **Post-Deploy Configuration (Ansible):** `run-ansible.sh` dynamically generates an inventory from Terraform outputs, fetches secrets from AWS SSM Parameter Store, and runs Ansible playbooks in dependency order: starting `etcd` DCS, configuring Patroni automated PostgreSQL HA replication, setting up HAProxy Layer 4 read/write splitting, Certbot SSL certificates, Cloudflare Tunnel, and Grafana Alloy monitoring agents.
 
-The master orchestrator script `deploy-environment.sh <staging|production>` runs Terraform plan, apply, and Ansible in sequence with environment-specific variables and S3 state isolation.
+The master orchestrator script `deploy-environment.sh <staging|production>` runs Terraform plan, pauses for operator review and confirmation, applies infrastructure changes, and provisions services with Ansible in sequence.
 
 ### Key Design Decisions
 
@@ -192,7 +194,7 @@ cd infra/scripts
 ./deploy-environment.sh staging    # or: ./deploy-environment.sh production
 ```
 
-This runs `terraform plan`, `terraform apply`, and `run-ansible.sh` in sequence.
+This runs `terraform plan`, prompts the operator to review and confirm the planned changes `[y/N]`, and then runs `terraform apply` followed by `run-ansible.sh`.
 
 ### 5. Verify
 
@@ -352,12 +354,13 @@ sudo journalctl -u iot-analytics.service --no-pager -n 20
 
 Expected output:
 ```
-=== [date] Memulai Pipeline Batch Spark per-Jam ===
-Menjalankan export_to_parquet.py...
-Berhasil query N baris dari DB
-Upload ke S3: s3://bucket-name/raw/sensor_YYYYMMDD_HHMMSS_YYYYMMDD_HHMMSS.parquet
-Memicu spark-submit untuk batch_analytics.py...
-=== [date] Pipeline Batch Spark Jam-an Selesai dengan Sukses ===
+=== [date] Starting Hourly Spark Batch Pipeline ===
+Running export_to_parquet.py...
+Records  : N
+Analytics saved: 3 device metrics
+Anomalies saved via distributed JDBC write
+Completed in XX.XX seconds
+=== [date] Hourly Spark Batch pipeline is complete successfully ===
 ```
 
 ### Database Replication Status

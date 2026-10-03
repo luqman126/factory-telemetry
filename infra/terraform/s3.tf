@@ -1,18 +1,18 @@
 # ============================================================
 # infra/terraform/s3.tf
-# S3 Bucket untuk Data Lake (Parquet)
+# S3 Bucket for Data Lake (Parquet telemetry)
 # ============================================================
 
 resource "aws_s3_bucket" "datalake" {
-  bucket        = "${var.project_name}-datalake-${var.environment}"
-  force_destroy = true # Mengizinkan bucket dihapus beserta isinya saat 'terraform destroy'
+  bucket        = "${var.project_name}-datalake-${var.environment}-apse1-944551807382"
+  force_destroy = true # Allow bucket deletion including contents on 'terraform destroy'
 
   tags = {
-    Name = "${var.project_name}-datalake-${var.environment}"
+    Name = "${var.project_name}-datalake-${var.environment}-apse1-944551807382"
   }
 }
 
-# Blokir semua akses publik secara eksplisit demi keamanan (Best Practice)
+# Block all public access explicitly for security hardening (Best Practice)
 resource "aws_s3_bucket_public_access_block" "datalake" {
   bucket = aws_s3_bucket.datalake.id
 

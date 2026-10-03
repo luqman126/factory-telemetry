@@ -1,0 +1,17 @@
+[Unit]
+Description=etcd - Distributed Key-Value Store for Patroni DCS 
+Documentation=https://github.com/etcd-io/etcd
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=etcd
+Group=etcd
+ExecStart=/usr/local/bin/etcd --config-file={{  etcd_conf_dir }}/etcd.conf.yml
+Restart=always
+RestartSec=5s
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

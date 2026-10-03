@@ -1,5 +1,5 @@
 [Unit]
-Description=Certbot Renewal (Let's Encrypt cert untuk MQTT TLS)
+Description=Certbot Renewal (Let's Encrypt certificate for MQTT TLS)
 After=network.target
 
 [Service]

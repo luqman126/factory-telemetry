@@ -1,0 +1,24 @@
+---
+patroni_scope: "iot-telemetry-cluster"
+patroni_namespace: "/service"
+
+patroni_restapi_port: 8008
+patroni_pg_port: 5432
+
+# S3 Bucket for offline wheel relay
+s3_bucket: "iot-bigdata-datalake-staging-apse1-944551807382"
+aws_region: "ap-southeast-1"
+
+# Applayer private IP where etcd is running
+etcd_host: "10.1.1.10"
+etcd_port: 2379
+
+# Patroni DCS settings
+patroni_ttl: 30
+patroni_loop_wait: 10
+patroni_retry_timeout: 10
+patroni_maximum_lag_on_failover: 1048576
+
+# PostgreSQL paths on Amazon Linux 2023
+pg_data_dir: "/var/lib/pgsql/data"
+pg_bin_dir: "/usr/bin"

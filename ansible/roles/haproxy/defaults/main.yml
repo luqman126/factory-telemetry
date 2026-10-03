@@ -1,0 +1,11 @@
+---
+haproxy_primary_port: 5000
+haproxy_replica_port: 5001
+haproxy_stats_port: 7000
+
+db_port: 5432
+patroni_restapi_port: 8008
+
+# Datalayer private IPs
+datalayer1_ip: "10.1.2.10"
+datalayer2_ip: "10.1.2.20"

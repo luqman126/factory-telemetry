@@ -21,8 +21,10 @@ from pathlib import Path
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 
-_ENV_PATH = Path(__file__).parents[1] / "infra" / ".env"
-load_dotenv(dotenv_path=_ENV_PATH)
+_SIMULATOR_ENV = Path(__file__).parents[1] / "infra" / ".env.simulator"
+_DEFAULT_ENV = Path(__file__).parents[1] / "infra" / ".env"
+
+load_dotenv(dotenv_path=_SIMULATOR_ENV if _SIMULATOR_ENV.exists() else _DEFAULT_ENV)
 
 # Load logging level dynamically from environment variable (defaults to INFO)
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -75,12 +77,12 @@ BASELINE = {
     "ruang_produksi": {
         "temperature": 30.0,
         "humidity":    60.0,
-        "accel_z":     9.81,   # gravitasi normal
+        "accel_z":     9.81,   # normal gravity
     },
     "ruang_penyolderan": {
-        "temperature": 32.0,   # lebih panas karena proses soldering
+        "temperature": 32.0,   # warmer due to soldering process
         "humidity":    55.0,
-        "flux_ppm":    20.0,   # kadar uap flux normal
+        "flux_ppm":    20.0,   # normal flux vapor level
     },
     "ruang_penyimpanan": {
         "temperature": 25.0,

@@ -1,0 +1,6 @@
+---
+- name: Install etcd
+  ansible.builtin.import_tasks: install.yml
+
+- name: configure and start etcd
+  ansible.builtin.import_tasks: configure.yml

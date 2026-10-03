@@ -1,0 +1,150 @@
+services:
+
+  # ----------------------------------------------------------
+  # Mosquitto
+  # ----------------------------------------------------------
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: iot_mosquitto
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1883:1883"   # Plaintext, local host only (backend)
+    volumes:
+      - ./mosquitto/mosquitto-local.conf:/mosquitto/config/mosquitto.conf:ro # Switch to local mosquitto configuration file
+      - ./mosquitto/passwd:/mosquitto/config/passwd:ro
+      - ./mosquitto/acl:/mosquitto/config/acl:ro
+      - ./mosquitto/certs:/mosquitto/certs:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - iot_net
+
+  # ----------------------------------------------------------
+  # PostgreSQL
+  # ----------------------------------------------------------
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: iot_timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:              ${POSTGRES_USER}
+      POSTGRES_PASSWORD:          ${POSTGRES_PASSWORD}
+      POSTGRES_DB:                ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ../db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro  
+    networks:
+      - iot_net
+
+  # ----------------------------------------------------------
+  # Grafana
+  # ----------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: iot_grafana
+    depends_on:
+      - timescaledb
+    restart: unless-stopped
+    environment:
+      # Grafana user for admin role
+      GF_SECURITY_ADMIN_USER:     ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      # Database
+      POSTGRES_USER:              ${POSTGRES_USER}
+      POSTGRES_PASSWORD:          ${POSTGRES_PASSWORD}
+      POSTGRES_DB:                ${POSTGRES_DB}
+      POSTGRES_HOST:              ${POSTGRES_HOST}
+      POSTGRES_HOST_REPLICA:      ${POSTGRES_HOST_REPLICA:-${POSTGRES_HOST}}
+      POSTGRES_PORT:              ${POSTGRES_PORT:-5432}
+      
+      TELEGRAM_BOT_TOKEN_IOT:     ${TELEGRAM_BOT_TOKEN_IOT}
+      TELEGRAM_CHAT_ID_IOT:       ${TELEGRAM_CHAT_ID_IOT}
+      TELEGRAM_BOT_TOKEN_SERVER:  ${TELEGRAM_BOT_TOKEN_SERVER}
+      TELEGRAM_CHAT_ID_SERVER:    ${TELEGRAM_CHAT_ID_SERVER}
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - iot_net
+
+  # ----------------------------------------------------------
+  # Backend
+  # ----------------------------------------------------------
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    image: iot-backend:latest
+    container_name: iot_backend
+    depends_on:
+      - mosquitto
+      - timescaledb
+    restart: unless-stopped
+    environment:
+      # Database
+      POSTGRES_DB:        ${POSTGRES_DB}
+      POSTGRES_USER:      ${POSTGRES_USER}
+      POSTGRES_PASSWORD:  ${POSTGRES_PASSWORD}
+      POSTGRES_HOST:      ${POSTGRES_HOST}
+      POSTGRES_PORT:      ${POSTGRES_PORT}
+      # MQTT (Points to the container name 'mosquitto' on iot_net)
+      MQTT_BROKER_HOST:   mosquitto
+      MQTT_BROKER_PORT:   ${MQTT_BROKER_PORT}
+      MQTT_TOPIC_PREFIX:  ${MQTT_TOPIC_PREFIX}
+      MQTT_USER:          ${MQTT_USER}
+      MQTT_PASSWORD:      ${MQTT_PASSWORD} 
+      # Logging
+      LOG_LEVEL:          ${LOG_LEVEL:-INFO}
+    ports:
+      - "127.0.0.1:8000:8000" # Local access only
+    networks:
+      - iot_net
+
+  # ----------------------------------------------------------
+  # MinIO (S3-Compatible Local Datalake)
+  # ----------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: iot_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # Web Console UI
+    volumes:
+      - minio_data:/data
+    networks:
+      - iot_net
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: iot_minio_init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 2;
+      /usr/bin/mc alias set localminio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb localminio/iot-bigdata-datalake-kagebyo || true;
+      exit 0;
+      "
+    networks:
+      - iot_net
+
+networks:
+  iot_net:
+    driver: bridge
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
+  grafana_data:
+  prometheus_data:
+  timescaledb:
+  minio_data:

@@ -1,7 +1,7 @@
 # ============================================================
 # app/mqtt/consumer.py
-# Subscribe ke MQTT broker, terima payload sensor, simpan ke DB
-# Menggunakan buffered batch insert untuk throughput tinggi
+# Subscribe to MQTT broker, consume sensor payloads, persist to DB
+# Implements buffered batch inserts for high ingestion throughput
 # ============================================================
 
 import json
@@ -21,20 +21,20 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Topic yang di-subscribe: semua device, semua ruangan
+# Subscribed topic pattern: all devices, all locations
 MQTT_TOPIC = "iot/sensor/+/+"
 
 # Buffer config
 BATCH_SIZE = 50
-FLUSH_INTERVAL = 5.0  # detik
+FLUSH_INTERVAL = 5.0  # seconds
 
-# Buffer dan lock
+# Buffer and lock
 _buffer: list = []
 _buffer_lock = threading.Lock()
 _flush_timer: threading.Timer | None = None
 
 def _flush_buffer() -> None:
-    """Flush buffer ke DB. Dipanggil dari timer atau saat buffer penuh."""
+    """Flush buffer to DB. Triggered by timer or when buffer reaches capacity."""
     global _flush_timer
     with _buffer_lock:
         if not _buffer:
@@ -47,7 +47,7 @@ def _flush_buffer() -> None:
         insert_batch(batch)
         logger.info(f"Batch insert: {len(batch)} records")
     except Exception as e:
-        logger.error(f"Batch insert gagal ({len(batch)} records): {e}")
+        logger.error(f"Batch insert failed ({len(batch)} records): {e}")
 
     _schedule_flush()
 
@@ -61,7 +61,7 @@ def _schedule_flush() -> None:
 
 
 def stop_flush_timer() -> None:
-    """Stop timer dan flush sisa buffer. Dipanggil saat shutdown."""
+    """Stop timer and flush remaining buffer items. Invoked during shutdown."""
     global _flush_timer
     if _flush_timer:
         _flush_timer.cancel()
@@ -72,17 +72,17 @@ def stop_flush_timer() -> None:
                 insert_batch(_buffer.copy())
                 logger.info(f"Final flush: {len(_buffer)} records")
             except Exception as e:
-                logger.error(f"Final flush gagal: {e}")
+                logger.error(f"Final flush failed: {e}")
             _buffer.clear()
 
 
 def on_connect(client, userdata, flags, reason_code, properties):
     if reason_code == 0:
-        logger.info("MQTT terhubung ke broker")
+        logger.info("MQTT connected to broker successfully")
         client.subscribe(MQTT_TOPIC)
         logger.info(f"Sent subscription request for {MQTT_TOPIC}")
     else:
-        logger.error(f"Gagal connect ke broker, reason code: {reason_code}")
+        logger.error(f"Failed to connect to MQTT broker, reason code: {reason_code}")
 
 def on_subscribe(client, userdata, mid, reason_code_list, properties):
     logger.info(f"MQTT subscription acknowledged: mid={mid}, reason_codes={reason_code_list}")
@@ -90,8 +90,8 @@ def on_subscribe(client, userdata, mid, reason_code_list, properties):
 
 def on_message(client, userdata, msg):
     """
-    Dipanggil setiap ada pesan masuk dari broker.
-    Alur: decode JSON → validasi Pydantic → buffer → flush saat penuh
+    Invoked on each incoming message from broker.
+    Pipeline: decode JSON -> Pydantic validation -> buffer -> flush when full
     """
     try:
         raw = json.loads(msg.payload.decode("utf-8"))
@@ -147,7 +147,7 @@ def on_message(client, userdata, msg):
             message = json.dumps(cmd)
 
             client.publish(topic, message, qos=1)
-            logger.info(f"[CONTROL] safe condition restored on {device_id} ({location}). Turning Fan OFF.")
+            logger.info(f"[CONTROL] Safe condition restored on {device_id} ({location}). Turning Fan OFF.")
 
         batch = None
         with _buffer_lock:
@@ -161,25 +161,25 @@ def on_message(client, userdata, msg):
                 insert_batch(batch)
                 logger.info(f"Batch insert (full): {len(batch)} records")
             except Exception as e:
-                logger.error(f"Batch insert gagal: {e}")
+                logger.error(f"Batch insert failed: {e}")
 
     except json.JSONDecodeError as e:
-        logger.error(f"Payload bukan JSON valid: {e}")
+        logger.error(f"Invalid JSON payload: {e}")
     except ValidationError as e:
-        logger.error(f"Payload tidak sesuai schema: {e}")
+        logger.error(f"Payload does not match schema: {e}")
     except Exception as e:
-        logger.error(f"Gagal proses pesan: {e}")
+        logger.error(f"Failed to process message: {e}")
 
 
 def on_disconnect(client, userdata, flags, reason_code, properties):
     if reason_code != 0:
-        logger.warning(f"MQTT terputus, reason code: {reason_code}")
+        logger.warning(f"MQTT disconnected unexpectedly, reason code: {reason_code}")
 
 
 def start_mqtt_consumer() -> mqtt.Client:
     """
-    Inisialisasi dan jalankan MQTT client.
-    Dipanggil dari main.py saat backend start.
+    Initialize and start MQTT consumer client.
+    Called from main.py during backend startup.
     """
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect
@@ -190,7 +190,7 @@ def start_mqtt_consumer() -> mqtt.Client:
     broker_host = os.getenv("MQTT_BROKER_HOST", "localhost")
     broker_port = int(os.getenv("MQTT_BROKER_PORT", 1883))
 
-    # Auth jika dikonfigurasi
+    # Authentication if configured
     mqtt_user = os.getenv("MQTT_USER")
     mqtt_pass = os.getenv("MQTT_PASSWORD")
     if mqtt_user and mqtt_pass:

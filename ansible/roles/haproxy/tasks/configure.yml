@@ -1,0 +1,16 @@
+---
+- name: Deploy HAProxy configuration file
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: '0644'
+    validate: haproxy -c -f %s
+  notify: Restart haproxy
+
+- name: Ensure HAProxy service is started and enabled
+  ansible.builtin.systemd:
+    name: haproxy
+    state: started
+    enabled: true

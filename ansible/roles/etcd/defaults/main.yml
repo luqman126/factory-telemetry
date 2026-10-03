@@ -1,0 +1,11 @@
+---
+etcd_version: "3.5.15"
+etcd_data_dir: "/var/lib/etcd"
+etcd_conf_dir: "/etc/etcd"
+etcd_client_port: 2379
+etcd_peer_port: 2380
+
+# Listen on all interfaces so datalayer-1 & datalayer-2 can communicate with etcd over VPC
+etcd_listen_client_urls: "http://0.0.0.0:{{ etcd_client_port }}"
+# Advertise address: ONLY advertise the VPC private IP to cluster members
+etcd_advertise_client_urls: "http://{{ ansible_default_ipv4.address }}:{{ etcd_client_port }}"

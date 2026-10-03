@@ -25,10 +25,10 @@ ebs_volume_size         = 30
 # ---- Rincian AMI & Key Pair (SESUAIKAN DENGAN AKUN AWS ANDA) ----
 
 # Custom AMI ID for applayer nodes
-applayer_ami_id = "ami-06300b37dd6a8f1ce"
+applayer_ami_id = "ami-0bca8159489e12972"
 
 # Custom AMI ID for database nodes
-datalayer_ami_id = "ami-0057a08287089dcfb"
+datalayer_ami_id = "ami-0e18654cd88a6361d"
 
 # Custom AMI ID for Spark Worker nodes (Pre-installed Java 21 & Spark 3.5.8)
 worker_ami_id = "ami-03256949a823ccf8b"

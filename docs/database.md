@@ -521,3 +521,18 @@ If the standby replica goes offline permanently while its replication slot remai
 ### Split-Brain Prevention
 When promoting a standby, there is a risk that the failed primary node comes online again, resulting in two active write primary nodes.
 - **Mitigation:** Ensure the failed node is fully offline or postgresql is stopped before promotion. Never start PostgreSQL on the failed primary until it has been completely wiped and rebuilt using `pg_basebackup`.
+
+---
+
+## 8. Database Schema Migrations (dbmate)
+
+To maintain a strict, reproducible history of schema changes across environments, the project uses `dbmate` for database migrations.
+
+### Migration Strategy
+- `dbmate` is executed as a **one-shot CI/CD job** rather than a persistent background daemon. It applies the schema delta and exits immediately.
+- Migrations are triggered manually or via automation using the wrapper script: `db/run_migrations.sh`.
+- The tool maintains an internal `schema_migrations` table to track which migrations have already been applied, ensuring idempotency.
+
+### Naming Conventions
+Migrations strictly follow the **14-digit timestamp naming convention** (e.g., `20260829000000_wide_column_analytics.sql`) rather than sequential numbering (`001_migration.sql`). 
+This prevents merge conflicts in version control when multiple developers are creating migrations simultaneously, aligning with industry best practices for schema management.

@@ -21,6 +21,11 @@ This document captures the key engineering failures, debugging processes, and au
 - **Cause:** Rebuilding the `applayer-1` instance generated a new Tailscale interface IP (`<tailscale-new-ip>`), while the Cloudflare DNS record for `<staging-mqtt-domain>` was still pointing to the cached IP of the destroyed instance (`<tailscale-old-ip>`).
 - **Solution:** Updated the Cloudflare DNS record to map to the new Tailscale IP, restoring internal VPN routing.
 
+### Issue: EC2 User-Data Execution Gap on SSM Parameter Update
+- **Symptom:** After updating an expired `tailscale_auth_key` in `staging.secrets.tfvars` and executing `deploy-environment.sh`, the `applayer-1` node failed to connect to the Tailscale network, causing the Ansible inventory discovery to fail.
+- **Cause:** EC2 `user_data` scripts only run on initial instance launch. Updating an AWS SSM Parameter Store value via Terraform updates the parameter in AWS in-place, but does not alter the EC2 instance resource definition. Terraform therefore did not trigger instance replacement, and the running instance never re-executed its boot registration script with the new key.
+- **Solution:** Marked the instance for replacement using `terraform taint aws_instance.applayer` and re-ran `deploy-environment.sh`. This forced Terraform to recreate the instance, properly executing `user_data` on boot with the updated auth key.
+
 ### Issue: Ephemeral Worker Launch Failure (ec2:CreateTags Policy Gap)
 - **Symptom:** Launching the Spark ephemeral worker via `run_with_worker.sh` crashed with an `UnauthorizedOperation` error stating `is not authorized to perform: ec2:CreateTags on resource: arn:aws:ec2:ap-southeast-1:...:instance/*`.
 - **Cause:** The script launches worker instances with `--tag-specifications` to set the worker's Name tag during creation. In AWS, assigning tags during instance creation requires the `ec2:CreateTags` permission. Our strict IAM role policy `least_privilege` was missing this action.
@@ -129,3 +134,12 @@ This document captures the key engineering failures, debugging processes, and au
 - **Cause:** Terraform 1.10+ introduced native S3 object lock files (`use_lockfile = true`) as a built-in replacement for external DynamoDB locking tables.
 - **Solution:** Created standalone `infra/terraform-bootstrap/` module to provision `iot-bigdata-terraform-state` S3 bucket with versioning and `prevent_destroy`. Migrated main infrastructure state via `terraform init -migrate-state` and configured native `use_lockfile = true` in `infra/terraform/main.tf`, eliminating DynamoDB table overhead and deprecation warnings completely.
 
+### Issue: TimescaleDB Symlink Idempotency & Shell Module Vulnerabilities
+- **Symptom:** Re-running the `timescaledb_primary` Ansible playbook on the database replica caused catastrophic failures, corrupting database node roles and disconnecting the replica.
+- **Cause:** The Ansible playbook originally used the raw `shell` module to perform naive `find` and `ln -sf` operations for TimescaleDB library symlinking. Running these commands repeatedly altered permissions indiscriminately, breaking Patroni replication and idempotency principles.
+- **Solution:** Refactored the Ansible roles `timescaledb_primary` and `timescaledb_replica` to replace raw shell commands with native `ansible.builtin.find` and `ansible.builtin.file` modules. This ensures declarative, idempotent execution where symlinks are only created if missing, and state remains unchanged on subsequent runs, restoring replica connectivity and stability.
+
+### Issue: Inconsistent Database Schema State & Migration Management
+- **Symptom:** Changes to the wide-column analytics schema were not systematically tracked or applied, risking schema drift between environments and missing `schema_migrations` history.
+- **Cause:** Schema updates were initially applied ad-hoc via `init.sql` instead of a standardized migration tool, making it difficult to understand the database schema history.
+- **Solution:** Adopted `dbmate` inside a one-shot CI/CD Docker container via `run_migrations.sh`. Migrations are now strictly tracked using the 14-digit timestamp naming convention (e.g., `20260829000000_wide_column_analytics.sql`), ensuring a complete, reproducible history in the database's `schema_migrations` table without requiring a persistent daemon on the cluster.

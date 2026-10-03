@@ -1,5 +1,9 @@
 # Credentials - jangan pernah di-commit
+*.env.*
 infra/.env
+!*.env.example
+infra/.env.simulator
+!*.env.simulator.example
 infra/mosquitto/passwd
 infra/mosquitto/certs/
 
@@ -32,3 +36,5 @@ infra/terraform/*.secrets.tfvars
 infra/terraform/environments/*.secrets.tfvars
 infra/terraform/.terraform/
 infra/terraform/terraform.tfstate*
+*.plan
+infra/terraform/*.plan

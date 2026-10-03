@@ -1,154 +1,183 @@
 {
-  "title": "IoT Manufacturing Monitor",
-  "uid": "iot-manufacturing-v1",
-  "schemaVersion": 38,
-  "version": 1,
-  "refresh": "5s",
-  "time": {
-    "from": "now-1h",
-    "to": "now"
-  },
-  "panels": [
-    {
-      "id": 1,
-      "title": "Temperature per Ruangan",
-      "type": "timeseries",
-      "gridPos": {
-        "x": 0,
-        "y": 0,
-        "w": 12,
-        "h": 8
-      },
-      "datasource": "TimescaleDB",
-      "targets": [
-        {
-          "rawSql": "SELECT time, temperature, device_id || ' - ' || location AS device FROM sensor_readings WHERE $__timeFilter(time) AND temperature IS NOT NULL ORDER BY time",
-          "format": "time_series",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "celsius",
-          "custom": {
-            "lineWidth": 2
-          }
-        }
-      }
-    },
-    {
-      "id": 2,
-      "title": "Gas/Flux Status - Ruang Penyolderan",
-      "type": "timeseries",
-      "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 12,
-        "h": 8
-      },
-      "datasource": "TimescaleDB",
-      "targets": [
-        {
-          "rawSql": "SELECT time, CASE WHEN voc_level = 'HAZARDOUS' THEN 1 WHEN voc_level = 'GOOD' THEN 0 ELSE NULL END AS mq135_status, device_id || ' - ' || location AS device FROM sensor_readings WHERE $__timeFilter(time) AND location = 'ruang_penyolderan' AND voc_level IS NOT NULL ORDER BY time",
-          "format": "time_series",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "lineWidth": 2
-          },
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "GOOD",
-                  "color": "green"
-                },
-                "1": {
-                  "text": "HAZARDOUS",
-                  "color": "red"
-                }
-              }
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          }
-        }
-      }
-    },
-    {
-      "id": 3,
-      "title": "Vibration RMS - Ruang Produksi",
-      "type": "timeseries",
-      "gridPos": {
-        "x": 0,
-        "y": 8,
-        "w": 12,
-        "h": 8
-      },
-      "datasource": "TimescaleDB",
-      "targets": [
-        {
-          "rawSql": "SELECT time, vibration_rms, device_id || ' - ' || location FROM sensor_readings WHERE $__timeFilter(time) AND vibration_rms IS NOT NULL ORDER BY time",
-          "format": "time_series",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "accMS2",
-          "custom": {
-            "lineWidth": 2
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          }
-        }
-      }
-    },
-    {
-      "id": 4,
-      "title": "Anomali Terdeteksi",
-      "type": "table",
-      "gridPos": {
-        "x": 0,
-        "y": 16,
-        "w": 24,
-        "h": 8
-      },
-      "datasource": "TimescaleDB",
-      "targets": [
-        {
-          "rawSql": "SELECT event_time AS \"Waktu\", device_id AS \"Device\", location AS \"Lokasi\", sensor_type AS \"Sensor\", observed_value AS \"Nilai\", threshold_value AS \"Threshold\", severity AS \"Severity\" FROM anomaly_events WHERE $__timeFilter(event_time) ORDER BY event_time DESC LIMIT 50",
-          "format": "table",
-          "refId": "A"
-        }
-      ]
-    }
-  ]
+	"title": "IoT Manufacturing Monitor",
+	"uid": "iot-manufacturing-v1",
+	"schemaVersion": 38,
+	"version": 1,
+	"refresh": "5s",
+	"time": {
+		"from": "now-1h",
+		"to": "now"
+	},
+	"panels": [
+		{
+			"id": 1,
+			"title": "Temperature per Ruangan",
+			"type": "timeseries",
+			"gridPos": {
+				"x": 0,
+				"y": 0,
+				"w": 12,
+				"h": 8
+			},
+			"datasource": "TimescaleDB-Replica",
+			"targets": [
+				{
+					"rawSql": "SELECT time, temperature, device_id || ' - ' || location AS device FROM sensor_readings WHERE $__timeFilter(time) AND temperature IS NOT NULL ORDER BY time",
+					"format": "time_series",
+					"refId": "A"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"unit": "celsius",
+					"custom": {
+						"lineWidth": 2
+					}
+				}
+			}
+		},
+		{
+			"id": 2,
+			"title": "Gas/Flux Status - Ruang Penyolderan",
+			"type": "timeseries",
+			"gridPos": {
+				"x": 12,
+				"y": 0,
+				"w": 12,
+				"h": 8
+			},
+			"datasource": "TimescaleDB-Replica",
+			"targets": [
+				{
+					"rawSql": "SELECT time, CASE WHEN voc_level = 'HAZARDOUS' THEN 1 WHEN voc_level = 'GOOD' THEN 0 ELSE NULL END AS mq135_status, device_id || ' - ' || location AS device FROM sensor_readings WHERE $__timeFilter(time) AND location = 'ruang_penyolderan' AND voc_level IS NOT NULL ORDER BY time",
+					"format": "time_series",
+					"refId": "A"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"unit": "short",
+					"custom": {
+						"lineWidth": 2
+					},
+					"mappings": [
+						{
+							"type": "value",
+							"options": {
+								"0": {
+									"text": "GOOD",
+									"color": "green"
+								},
+								"1": {
+									"text": "HAZARDOUS",
+									"color": "red"
+								}
+							}
+						}
+					],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 1
+							}
+						]
+					}
+				}
+			}
+		},
+		{
+			"id": 3,
+			"title": "Vibration RMS - Ruang Produksi",
+			"type": "timeseries",
+			"gridPos": {
+				"x": 0,
+				"y": 8,
+				"w": 12,
+				"h": 8
+			},
+			"datasource": "TimescaleDB-Replica",
+			"targets": [
+				{
+					"rawSql": "SELECT time, vibration_rms, device_id || ' - ' || location FROM sensor_readings WHERE $__timeFilter(time) AND vibration_rms IS NOT NULL ORDER BY time",
+					"format": "time_series",
+					"refId": "A"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"unit": "accMS2",
+					"custom": {
+						"lineWidth": 2
+					},
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 1
+							}
+						]
+					}
+				}
+			}
+		},
+		{
+			"id": 5,
+			"title": "Humidity per Ruangan",
+			"type": "timeseries",
+			"gridPos": {
+				"x": 12,
+				"y": 8,
+				"w": 12,
+				"h": 8
+			},
+			"datasource": "TimescaleDB-Replica",
+			"targets": [
+				{
+					"rawSql": "SELECT time, humidity, device_id || ' - ' || location AS device FROM sensor_readings WHERE $__timeFilter(time) AND humidity IS NOT NULL ORDER BY time",
+					"format": "time_series",
+					"refId": "A"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"unit": "humidity",
+					"min": 0,
+					"max": 100,
+					"custom": {
+						"lineWidth": 2
+					}
+				}
+			}
+		},
+		{
+			"id": 4,
+			"title": "Anomali Terdeteksi",
+			"type": "table",
+			"gridPos": {
+				"x": 0,
+				"y": 16,
+				"w": 24,
+				"h": 8
+			},
+			"datasource": "TimescaleDB-Replica",
+			"targets": [
+				{
+					"rawSql": "SELECT event_time AS \"Waktu\", device_id AS \"Device\", location AS \"Lokasi\", sensor_type AS \"Sensor\", observed_value AS \"Nilai\", threshold_value AS \"Threshold\", ROUND(z_score::numeric, 2) AS \"Z-Score\", severity AS \"Severity\" FROM anomaly_events WHERE $__timeFilter(event_time) ORDER BY event_time DESC LIMIT 50",
+					"format": "table",
+					"refId": "A"
+				}
+			]
+		}
+	]
 }

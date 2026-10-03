@@ -1,0 +1,8 @@
+---
+- name: Install Patroni
+  ansible.builtin.import_tasks: install.yml
+  tags: patroni_install
+
+- name: Configure and start Patroni
+  ansible.builtin.import_tasks: configure.yml
+  tags: patroni_configure
