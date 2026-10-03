@@ -520,6 +520,18 @@ The production workflow runs in Local Mode for cost efficiency. Ephemeral distri
 
 ---
 
+### 6. Mesh VPN DNS Hijacking and Cascading CI/CD Failures (Tailscale vs. Cloud VPC Resolvers)
+
+**Challenge:** After rebooting or recovering a node under sustained load, Tailscale MagicDNS took over local DNS resolution (`[fd7a:115c:a1e0::53]:53`). Because MagicDNS lacked public upstream resolvers on the node, external DNS queries failed (`server misbehaving`). This triggered a severe cascading failure in the automated GitHub Actions CD pipeline: AWS SSM endpoints failed to resolve to fetch environment secrets, Docker Hub failed to pull base images for database migrations, and missing credentials caused Docker Compose to mount a missing password file as a directory (`not a directory` mount conflict).
+
+**Solution:** Explicitly configured `--accept-dns=false` on cloud nodes to ensure instances prioritize the native AWS VPC DNS resolver (`169.254.169.253` / AmazonProvidedDNS) for critical cloud infrastructure and CI/CD operations, while reserving Tailscale strictly for point-to-point mesh overlay routing.
+
+**Outcome:** Eliminated DNS resolution contention. Subsequent GitHub Actions deployment runs cleanly fetched SSM Parameter Store secrets, pulled container images, executed migrations, and achieved a 100% green production rollout.
+
+**Deep-dive:** [Staging Retrospective](docs/retrospective.md)
+
+---
+
 ## Future Improvements
 
 While the current architecture successfully proves the end-to-end flow of IoT telemetry, the following evolution paths are identified for operational maturity and deeper systems engineering practice:
