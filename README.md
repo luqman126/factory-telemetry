@@ -80,7 +80,7 @@ This project deliberately uses self-hosted open-source components instead of man
 
 ## Architecture and System Overview
 
-![Architecture Topology](docs/architecture.jpg)
+![Architecture Topology](docs/architecture.png)
 
 *To generate an automated baseline version of this topology, run `cd docs && python3.12 diagram.py`.*
 
@@ -363,16 +363,36 @@ Completed in XX.XX seconds
 === [date] Hourly Spark Batch pipeline is complete successfully ===
 ```
 
-### Database Replication Status
+### Database Cluster and High Availability
 
-Verify streaming replication is active on `datalayer-1`:
+Verify Patroni cluster topology and streaming replication on either database node:
 
-```sql
-SELECT client_addr, state, sent_lsn, write_lsn, replay_lsn
-FROM pg_stat_replication;
+```bash
+sudo patronictl -c /etc/patroni/patroni.yml list
 ```
 
-Expected: one row with `state = streaming` and matching LSN values.
+Expected output:
+```text
++ Cluster: iot-telemetry-cluster (7692296643824458135) ----------+-----+------------+-----+
+| Member      | Host      | Role    | State     | TL | Receive LSN | Lag | Replay LSN | Lag |
++-------------+-----------+---------+-----------+----+-------------+-----+------------+-----+
+| datalayer-1 | 10.1.2.10 | Leader  | running   |  2 |             |     |            |     |
+| datalayer-2 | 10.1.2.20 | Replica | streaming |  2 |   0/412AA60 |   0 |  0/412AA60 |   0 |
++-------------+-----------+---------+-----------+----+-------------+-----+------------+-----+
+```
+
+Verify HAProxy Layer-4 health routing from `applayer-1`:
+```bash
+curl -s 'http://127.0.0.1:7000/;csv' | grep -E '^(postgres_primary|postgres_replica)' | cut -d',' -f1,2,18
+```
+
+Expected:
+```text
+postgres_primary,datalayer-1,UP
+postgres_primary,datalayer-2,DOWN
+postgres_replica,datalayer-1,DOWN
+postgres_replica,datalayer-2,UP
+```
 
 ### Benchmark Suite
 
@@ -386,6 +406,33 @@ cd benchmarks
 This runs `batch_analytics.py` across Local Mode, 1-Worker, and 2-Worker configurations, comparing execution time, record counts, and idempotency. Results are saved to `benchmarks/results/`.
 
 See [Spark Analytics Guide](docs/spark-analytics.md) for benchmark methodology, Amdahl's Law analysis, and full results.
+
+### Production Verification and Evidence Gallery
+
+#### 1. AWS Cloud Infrastructure Footprint
+All 6 EC2 instances running across staging and production clusters in `ap-southeast-1b`, provisioned via Terraform with custom Packer AMIs and passing 3/3 AWS health checks:
+
+![AWS EC2 Instances](docs/images/aws-ec2-instances.png)
+
+#### 2. Real-Time Telemetry and Batch Anomaly Detection
+Live production telemetry across all three factory zones (`ruang_produksi`, `ruang_penyolderan`, `ruang_penyimpanan`) streaming over TLS MQTT, paired with the automated anomaly detection table populated by Spark batch jobs:
+
+![Production IoT Manufacturing Monitor](docs/images/grafana-production-manufacturing.png)
+
+#### 3. Automated Zero-Downtime Database Failover (Hard Node Termination)
+Demonstrated catastrophic primary failure by hard-stopping `datalayer-1` in the AWS console. In Patroni, failover latency is governed by the 30-second etcd consensus lease (`patroni_ttl: 30`) to strictly prevent split-brain conditions, followed by an immediate **~2-second `pg_ctl promote`**:
+
+| Initial Cluster Topology (`11:41:19 UTC`) | Post-Failover Automatic Promotion (`11:42:32 UTC`) |
+| :---: | :---: |
+| ![Patroni Failover Before](docs/images/patroni-failover-before.png) | ![Patroni Failover After](docs/images/patroni-failover-after.png) |
+| `datalayer-1` active as Leader, `datalayer-2` streaming with zero lag | `datalayer-1` stopped in AWS; `datalayer-2` automatically promoted to Leader on Timeline 3 |
+
+*The entire end-to-end test—initiating the EC2 shutdown in the AWS console, waiting for hypervisor ACPI power-off, etcd lease expiration, standby promotion, and terminal inspection—was confirmed in **under 75 seconds** (`11:41:19` → `11:42:32 UTC`), with HAProxy transparently redirecting write traffic to `datalayer-2` with zero data loss.*
+
+#### 4. Host and Database Observability
+Production infrastructure metrics captured via Prometheus and Grafana Alloy, highlighting the CPU surge during Spark's hourly batch run and active PostgreSQL connection behavior across failovers:
+
+![Production Server and Database Monitor](docs/images/grafana-production-infrastructure.png)
 
 ---
 
@@ -444,6 +491,30 @@ The production workflow runs in Local Mode for cost efficiency. Ephemeral distri
 **Solution:** Added a polling loop that waits for SSM `PingStatus = Online` before sending remote commands.
 
 **Outcome:** Eliminated the race condition. `terraform apply` completes reliably without manual retries.
+
+**Deep-dive:** [Staging Retrospective](docs/retrospective.md)
+
+---
+
+### 4. High-Availability Consensus and Split-Brain Prevention (Patroni + etcd + HAProxy)
+
+**Challenge:** Managing stateful database failover on bare EC2 without managed cloud services (RDS/Aurora) risks split-brain scenarios and data divergence during network partitions or sudden node crashes.
+
+**Solution:** Deployed Patroni with an etcd Raft Distributed Consensus Store (DCS) for automated leader election and TTL-based fencing. Integrated Layer-4 HAProxy on `applayer-1` to dynamically poll Patroni's HTTP REST endpoints (`/primary` for write on port 5000, `/replica` for read-pooling on port 5001). Tested under simulated hard node failure (`sudo poweroff` / AWS EC2 stop).
+
+**Outcome:** Catastrophic primary node loss resulted in automated standby promotion within the **30-second etcd lease TTL** (`timeline: 2 -> 3`) with zero data loss. The entire human verification test from AWS Console shutdown to promoted cluster inspection was confirmed in **73 seconds**. Ingress write traffic was transparently rerouted by HAProxy without restarting backend services. Rejoining `datalayer-1` automatically triggered `pg_rewind` to resynchronize WAL from the new leader.
+
+**Deep-dive:** [Database Runbook](docs/database.md)
+
+---
+
+### 5. Systemd Boot Sequencing and DHCP Race Conditions in Cloud Instances
+
+**Challenge:** On newly launched or rebooted EC2 instances, Patroni failed to bind to its assigned private IP (`10.1.2.10:8008`) upon EC2 instance boot due to `network.target` firing before DHCP finalized IP binding (`OSError: [Errno 99] Cannot assign requested address`). With default `Restart=no`, the node remained failed and failed to rejoin the cluster.
+
+**Solution:** Updated systemd unit ordering to `After=network-online.target` and `Wants=network-online.target`, and configured `Restart=on-failure` with exponential backoff (`RestartSec=5s`).
+
+**Outcome:** Eliminated boot race conditions. Rebooted nodes now wait for full IP assignment or retry automatically, rejoining the cluster as healthy streaming replicas with zero manual intervention.
 
 **Deep-dive:** [Staging Retrospective](docs/retrospective.md)
 
