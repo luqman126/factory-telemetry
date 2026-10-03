@@ -132,6 +132,35 @@
 			}
 		},
 		{
+			"id": 5,
+			"title": "Humidity per Ruangan",
+			"type": "timeseries",
+			"gridPos": {
+				"x": 12,
+				"y": 8,
+				"w": 12,
+				"h": 8
+			},
+			"datasource": "TimescaleDB-Replica",
+			"targets": [
+				{
+					"rawSql": "SELECT time, humidity, device_id || ' - ' || location AS device FROM sensor_readings WHERE $__timeFilter(time) AND humidity IS NOT NULL ORDER BY time",
+					"format": "time_series",
+					"refId": "A"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"unit": "humidity",
+					"min": 0,
+					"max": 100,
+					"custom": {
+						"lineWidth": 2
+					}
+				}
+			}
+		},
+		{
 			"id": 4,
 			"title": "Anomali Terdeteksi",
 			"type": "table",

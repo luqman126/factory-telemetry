@@ -30,15 +30,15 @@ A factory floor has three operational zones, each with different environmental r
 
 | Zone | Sensors | Business Risk |
 |:---|:---|:---|
-| **Production Area** (`ruang_produksi`) | Temperature, Vibration (MPU6050) | Machine overheating or bearing wear halts the assembly line |
-| **Soldering Area** (`ruang_penyolderan`) | Temperature, Gas/VOC (MQ-135) | Toxic flux fumes endanger worker health and violate safety regulations |
-| **Storage Area** (`ruang_penyimpanan`) | Temperature | Excessive heat damages stored components and raw materials |
+| **Production Area** (`ruang_produksi`) | Temperature & Humidity (DHT22), Vibration (MPU6050) | Machine overheating or bearing wear halts the assembly line |
+| **Soldering Area** (`ruang_penyolderan`) | Temperature & Humidity (DHT22), Gas/VOC (MQ-135) | Toxic flux fumes endanger worker health and violate safety regulations |
+| **Storage Area** (`ruang_penyimpanan`) | Temperature & Humidity (DHT22) | Excessive heat or humidity damages stored components and raw materials |
 
 > **Note on Zone Naming:** Zone identifiers use Indonesian terminology (`ruang_produksi` = Production Area, `ruang_penyolderan` = Soldering Area, `ruang_penyimpanan` = Storage Area). These keys are intentionally preserved across the codebase to maintain backward compatibility with established MQTT topic paths, existing database records, Grafana dashboard queries, and simulator configurations without requiring complex data migrations.
 
 ### The Solution
 
-This project is a full-stack IoT monitoring pipeline for a simulated manufacturing facility. Sensors across three factory zones continuously stream temperature, vibration, and gas readings to a cloud backend over TLS-encrypted MQTT. The backend validates, stores, and analyzes the data in real time. When a dangerous condition is detected (e.g., overheating), it publishes a control command back to the device within milliseconds.
+This project is a full-stack IoT monitoring pipeline for a simulated manufacturing facility. Sensors across three factory zones continuously stream temperature, humidity, vibration, and gas readings to a cloud backend over TLS-encrypted MQTT. The backend validates, stores, and analyzes the data in real time. When a dangerous condition is detected (e.g., overheating), it publishes a control command back to the device within milliseconds.
 
 Raw telemetry is stored in a TimescaleDB time-series database with automatic hypertable partitioning. For long-term retention and heavy analytical workloads, data is exported hourly to Amazon S3 as compressed Parquet files and processed by Apache Spark batch jobs for aggregation and anomaly detection.
 
